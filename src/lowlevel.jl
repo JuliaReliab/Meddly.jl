@@ -155,10 +155,6 @@ function _ll_edge_complement(a::Ptr{Cvoid})
     ret, result[]
 end
 
-function _ll_edge_todot(edge::Ptr{Cvoid}, basename::String)
-    ccall((:meddly_edge_todot, libmeddly_c), Cint,
-          (Ptr{Cvoid}, Cstring), edge, basename)
-end
 
 _ll_edge_cardinality(p::Ptr{Cvoid}) =
     ccall((:meddly_edge_cardinality, libmeddly_c), Cdouble, (Ptr{Cvoid},), p)
