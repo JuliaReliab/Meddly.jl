@@ -36,6 +36,7 @@ using Meddly
     include("test_ifthenelse.jl")
     include("test_misc.jl")
     include("test_traverse.jl")
+    include("test_match.jl")
 
     cleanup()
 

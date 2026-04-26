@@ -111,6 +111,14 @@ function _ll_edge_copy(src::Ptr{Cvoid}, dst_forest::Ptr{Cvoid})
     ret, result[]
 end
 
+function _ll_edge_ifthenelse(cond::Ptr{Cvoid}, then_e::Ptr{Cvoid}, else_e::Ptr{Cvoid})
+    result = Ref{Ptr{Cvoid}}(C_NULL)
+    ret = ccall((:meddly_edge_ifthenelse, libmeddly_c), Cint,
+                (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ref{Ptr{Cvoid}}),
+                cond, then_e, else_e, result)
+    ret, result[]
+end
+
 # ------------------------------------------------------------------ #
 # Set operations                                                       #
 # ------------------------------------------------------------------ #

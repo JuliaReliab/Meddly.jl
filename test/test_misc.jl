@@ -2,7 +2,7 @@
 
 @testset "todot" begin
     dom = Domain([2, 2, 2])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
     e   = Edge(f, [0, 1, 0])
     dot = @test_nowarn todot(e)
     @test dot isa String
@@ -12,7 +12,7 @@ end
 @testset "GC / finalizer safety" begin
     # Create objects and let them go out of scope; GC should not crash.
     dom = Domain([3, 3])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
     for _ in 1:20
         e = Edge(f, [1, 2])
     end

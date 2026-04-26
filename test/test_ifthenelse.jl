@@ -2,8 +2,8 @@
 
 @testset "land / lor / lnot" begin
     dom    = Domain([4, 4])
-    bool_f = Forest(dom)
-    int_f  = Forest(dom; range = :integer)
+    bool_f = MDDForestBool(dom)
+    int_f  = MDDForestInt(dom)
 
     ea = Edge(int_f, [1, 2], 5)
     eb = Edge(int_f, [1, 2], 3)
@@ -28,8 +28,8 @@ end
 
 @testset "ifthenelse" begin
     dom    = Domain([4, 4])
-    bool_f = Forest(dom)
-    int_f  = Forest(dom; range = :integer)
+    bool_f = MDDForestBool(dom)
+    int_f  = MDDForestInt(dom)
 
     # ea = 5 at (1,2);  eb = 3 at (1,2);  ec = 7 at (2,3)
     ea = Edge(int_f, [1, 2], 5)
@@ -57,8 +57,8 @@ end
 
 @testset "ifthenelse with boolean condition (auto-convert)" begin
     dom    = Domain([4, 4])
-    bool_f = Forest(dom)
-    int_f  = Forest(dom; range = :integer)
+    bool_f = MDDForestBool(dom)
+    int_f  = MDDForestInt(dom)
 
     ea = Edge(int_f, [1, 2], 5)
     eb = Edge(int_f, [1, 2], 3)

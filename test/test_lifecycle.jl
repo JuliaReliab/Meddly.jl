@@ -14,12 +14,12 @@ end
 
 @testset "Forest" begin
     dom = Domain([2, 2, 2])
-    f   = @test_nowarn Forest(dom)
+    f   = @test_nowarn MDDForestBool(dom)
     @test f.ptr != C_NULL
 
-    f_int = @test_nowarn Forest(dom; kind = :mdd, range = :integer)
+    f_int = @test_nowarn MDDForestInt(dom; kind = :mdd)
     @test f_int.ptr != C_NULL
 
-    @test_throws ErrorException Forest(dom; kind = :bad)
-    @test_throws ErrorException Forest(dom; range = :bad)
+    @test_throws ErrorException MDDForestBool(dom; kind = :bad)
+    @test_throws ErrorException MDDForestInt(dom; kind = :bad)
 end

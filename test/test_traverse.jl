@@ -36,7 +36,7 @@ end
 
 @testset "num_vars / level_size" begin
     dom = Domain([3, 4, 2])   # 3 variables with sizes 3, 4, 2
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
 
     @test num_vars(f) == 3
     @test level_size(f, 1) == 3
@@ -46,7 +46,7 @@ end
 
 @testset "root_node / is_terminal — boolean" begin
     dom = Domain([4, 4])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
 
     # Empty edge → false terminal (handle 0)
     e_empty = Edge(f)
@@ -66,7 +66,7 @@ end
 
 @testset "terminal_value — boolean" begin
     dom = Domain([2, 2])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
 
     # true terminal: union of all minterms in a boolean domain
     e_all = Edge(f, [0,0]) | Edge(f, [0,1]) | Edge(f, [1,0]) | Edge(f, [1,1])
@@ -81,7 +81,7 @@ end
 
 @testset "evaluate — boolean MDD" begin
     dom = Domain([4, 4])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
 
     e = Edge(f, [1, 2])   # true at (1,2), false elsewhere
 
@@ -101,7 +101,7 @@ end
 
 @testset "evaluate — integer MDD" begin
     dom   = Domain([4, 4])
-    int_f = Forest(dom; range = :integer)
+    int_f = MDDForestInt(dom)
 
     # Constant edges
     c5 = Edge(int_f, 5)
@@ -131,7 +131,7 @@ end
 
 @testset "node_children length invariant" begin
     dom = Domain([3, 4, 2])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
 
     e = Edge(f, [0, 1, 0]) | Edge(f, [1, 2, 1]) | Edge(f, [2, 0, 0])
 
@@ -150,7 +150,7 @@ end
     # In a fully-reduced MDD, child(node, lv) may be at level lv' < lv - 1.
     # The "gap" levels contribute a multiplicative factor of their sizes.
     dom = Domain([4, 4])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
 
     function my_card(f, node, cache = Dict{NodeHandle, Float64}())
         haskey(cache, node) && return cache[node]

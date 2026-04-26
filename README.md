@@ -33,7 +33,7 @@ initialize()   # must be called once per process before anything else
 dom = Domain([2, 2, 2])
 
 # Boolean MDD forest
-f = Forest(dom)
+f = MDDForestBool(dom)
 
 # Single-minterm edges
 a = Edge(f, [0, 0, 1])   # {(0,0,1)}
@@ -54,26 +54,26 @@ cleanup()   # release global MEDDLY state
 
 ## Integer forest — pointwise functions
 
-Pass `range = :integer` to `Forest` to build an integer-valued MDD where each
-minterm maps to an integer instead of a boolean flag.
+Use `MDDForestInt` to build an integer-valued MDD where each minterm maps to
+an integer instead of a boolean flag.
 
 ```julia
 using Meddly
 initialize()
 
-dom = Domain([4, 4])   # 2 variables, each 0..3 (16 minterms total)
-f   = Forest(dom; range = :integer)
+dom   = Domain([4, 4])   # 2 variables, each 0..3 (16 minterms total)
+int_f = MDDForestInt(dom)
 
 # Constant edge: every minterm → 5
-c5 = Edge(f, 5)
+c5 = Edge(int_f, 5)
 cardinality(c5)   # → 16.0   (16 non-zero minterms)
 
 # Constant 0 edge: every minterm → 0  (equivalent to the empty function)
-c0 = Edge(f, 0)
+c0 = Edge(int_f, 0)
 is_empty(c0)      # → true
 
 # Single-minterm edge: (x1=1, x2=2) → 7, all others → 0
-e7 = Edge(f, [1, 2], 7)
+e7 = Edge(int_f, [1, 2], 7)
 cardinality(e7)   # → 1.0
 ```
 
@@ -82,8 +82,8 @@ cardinality(e7)   # → 1.0
 Integer-forest edges support pointwise arithmetic.
 
 ```julia
-ea = Edge(f, [1, 2], 5)   # (1,2) → 5
-eb = Edge(f, [1, 2], 3)   # (1,2) → 3
+ea = Edge(int_f, [1, 2], 5)   # (1,2) → 5
+eb = Edge(int_f, [1, 2], 3)   # (1,2) → 3
 
 ea + eb       # (1,2) → 8
 ea - eb       # (1,2) → 2
@@ -98,12 +98,16 @@ is_empty(ea - ea)   # → true  (zero function)
 
 ## Comparisons and logical operators
 
-Comparison operators take two integer-forest edges and a boolean-forest target,
-and return a boolean-forest edge that is `true` wherever the comparison holds.
+### Explicit boolean forest
+
+Comparison functions take two integer-forest edges and a boolean-forest
+target, returning a boolean-forest edge that is `true` wherever the comparison
+holds.
 
 ```julia
-bool_f = Forest(dom)
-int_f  = Forest(dom; range = :integer)
+dom    = Domain([4, 4])
+bool_f = MDDForestBool(dom)
+int_f  = MDDForestInt(dom)
 
 ea = Edge(int_f, [1, 2], 5)
 eb = Edge(int_f, [1, 2], 3)
@@ -114,8 +118,24 @@ c_eq  = eq(ea, eb, bool_f)    # true at the other 15 minterms   → card = 15
 c_neq = neq(ea, eb, bool_f)   # true at (1,2)                   → card = 1
 c_gte = gte(ea, eb, bool_f)   # (1,2) and 15 others             → card = 16
 c_lte = lte(ea, eb, bool_f)   # false at (1,2), true elsewhere  → card = 15
+```
 
-cardinality(c_gt)    # → 1.0
+### Operator overloads (no explicit boolean forest)
+
+`MDDForestInt` eagerly creates a paired boolean forest (`int_f.bool_forest`),
+enabling the standard Julia comparison operators directly.
+
+```julia
+int_f = MDDForestInt(dom)
+ea    = Edge(int_f, [1, 2], 5)
+eb    = Edge(int_f, [1, 2], 3)
+
+ea > eb    # → boolean edge, true at (1,2)
+ea < eb    # → boolean edge, empty
+ea == eb   # → boolean edge, true at the other 15 minterms
+ea != eb   # → boolean edge, true at (1,2)
+ea >= eb   # → boolean edge, card = 16
+ea <= eb   # → boolean edge, card = 15
 ```
 
 ### Logical operators on boolean edges
@@ -148,12 +168,16 @@ cardinality(c_int)   # → 1.0
 
 ### `ifthenelse` — pointwise conditional
 
+`ifthenelse` handles both boolean and integer conditions.  When the condition
+is a `MDDForestBool` edge, the efficient C++ `ite_mt` ternary operation
+(with compute-table memoisation) is used directly.
+
 ```julia
 ea = Edge(int_f, [1, 2], 5)
 eb = Edge(int_f, [1, 2], 3)
 ec = Edge(int_f, [2, 3], 7)
 
-# Boolean condition (auto-converted; no manual copy_edge needed)
+# Boolean condition — dispatches to C++ ternary ITE
 cond   = gt(ea, eb, bool_f)       # true at (1,2)
 result = ifthenelse(cond, ea, ec)
 # At (1,2): cond=true  → ea = 5
@@ -162,14 +186,33 @@ result = ifthenelse(cond, ea, ec)
 cardinality(result)   # → 2.0
 ```
 
-The condition can also be a compound boolean expression:
+---
+
+## `@match` macro — multi-arm conditional
+
+`@match` expands a sequence of `condition => value` arms into nested
+`ifthenelse` calls.  The last arm should use `_` as the catch-all.
+`&&` and `||` in conditions are automatically rewritten to `land` and `lor`.
 
 ```julia
-one_e = Edge(int_f, 1)
-ten_e = Edge(int_f, 10)
-# x in (1, 10]: gt(x, 1) AND lte(x, 10)
-cond2 = land(gt(x_edge, one_e, bool_f), lte(x_edge, ten_e, bool_f))
-result2 = ifthenelse(cond2, x_edge, three_e)
+ea = Edge(int_f, [1, 2], 5)
+eb = Edge(int_f, [1, 2], 3)
+ec = Edge(int_f, [2, 3], 7)
+ed = Edge(int_f, [3, 1], 2)
+
+# Equivalent to nested ifthenelse:
+# (1,2)→ea=5,  (2,3)→ec=7,  (3,1)→ed=2
+result = @match(
+    ea > eb => ea,
+    ec > ea => ec,
+    _       => ed
+)
+
+# Compound conditions
+result2 = @match(
+    (ea > eb) && lnot(ec > ea) => ed,
+    _                          => ec
+)
 ```
 
 ---
@@ -198,7 +241,7 @@ level_size(f, k)          # Int        — domain size at level k (1..K)
 
 is_terminal(node)         # Bool       — no forest pointer needed
 node_level(f, node)       # Int        — 0 for terminals, 1..K for internal
-terminal_value(f, node)   # Bool or Int depending on f.range
+terminal_value(f, node)   # Bool (MDDForestBool) or Int (MDDForestInt)
 node_children(f, node)    # Vector{NodeHandle}, length = level_size(f, level)
                           # children[i+1] is the child for variable value i
 ```
@@ -216,7 +259,7 @@ function evaluate(f, node::NodeHandle, var_values)
 end
 
 dom   = Domain([4, 4])
-int_f = Forest(dom; range = :integer)
+int_f = MDDForestInt(dom)
 ea    = Edge(int_f, [1, 2], 5)   # (1,2) → 5, else 0
 
 evaluate(int_f, root_node(ea), [1, 2])   # → 5
@@ -251,7 +294,7 @@ function my_cardinality(f, node::NodeHandle,
 end
 
 dom = Domain([4, 4])
-f   = Forest(dom)
+f   = MDDForestBool(dom)
 e   = Edge(f, [0, 0]) | Edge(f, [1, 1]) | Edge(f, [2, 2])
 
 my_cardinality(f, root_node(e))   # → 3.0
@@ -274,7 +317,7 @@ function collect_minterms(f, node::NodeHandle, path, results)
 end
 
 dom = Domain([3, 3])
-f   = Forest(dom)
+f   = MDDForestBool(dom)
 e   = Edge(f, [0, 1]) | Edge(f, [2, 0])
 
 path    = zeros(Int, num_vars(f))
@@ -305,12 +348,12 @@ function sum_values(f, node::NodeHandle, cache = Dict{NodeHandle, Float64}())
 end
 
 dom   = Domain([4, 4])
-int_f = Forest(dom; range = :integer)
+int_f = MDDForestInt(dom)
 # Build the identity function: minterm (v1, v2) → v1 + v2
 e = sum(Edge(int_f, [v1, v2], v1 + v2)
         for v1 in 0:3, v2 in 0:3)
 
-sum_values(int_f, root_node(e))   # → sum of all v1+v2 = 2 * 4 * (0+1+2+3) * 4 = 192.0
+sum_values(int_f, root_node(e))   # → 192.0
 ```
 
 ---
@@ -321,7 +364,7 @@ sum_values(int_f, root_node(e))   # → sum of all v1+v2 = 2 * 4 * (0+1+2+3) * 4
 
 ```julia
 dom = Domain([2, 2, 2])
-f   = Forest(dom)
+f   = MDDForestBool(dom)
 e   = Edge(f, [0, 1, 0])
 
 dot_str = todot(e)   # String containing "digraph { … }"
@@ -332,7 +375,7 @@ Pipe it to Graphviz to render:
 ```sh
 julia -e '
 using Meddly; initialize()
-dom = Domain([2,2,2]); f = Forest(dom); e = Edge(f, [0,1,0])
+dom = Domain([2,2,2]); f = MDDForestBool(dom); e = Edge(f, [0,1,0])
 write(stdout, todot(e)); cleanup()
 ' | dot -Tpng -o edge.png
 ```
@@ -341,13 +384,15 @@ write(stdout, todot(e)); cleanup()
 
 ## API reference
 
-| Function | Description |
+| Function / Type | Description |
 |---|---|
 | `initialize()` | Initialize the MEDDLY library (once per process) |
 | `cleanup()` | Release MEDDLY global state |
 | `Domain(sizes)` | Domain with `sizes[i]` values for variable `i` |
-| `Forest(dom; kind, range)` | Forest in `dom`; `kind ∈ {:mdd,:mxd}`, `range ∈ {:boolean,:integer}` |
-| `Edge(f)` | Empty boolean edge |
+| `MDDForestBool(dom; kind)` | Boolean MDD forest; `kind ∈ {:mdd, :mxd}` (default `:mdd`) |
+| `MDDForestInt(dom; kind)` | Integer MDD forest; eagerly creates a paired `bool_forest` |
+| `bool_forest(f)` | Return the `MDDForestBool` associated with `f` |
+| `Edge(f)` | Empty boolean edge / zero integer function |
 | `Edge(f, values)` | Single-minterm boolean edge |
 | `Edge(f, const_val)` | Constant integer edge (all minterms → `const_val`) |
 | `Edge(f, values, val)` | Single-minterm integer edge |
@@ -365,11 +410,13 @@ write(stdout, todot(e)); cleanup()
 | `lte(a, b, bool_f)` | Boolean: `a <= b` |
 | `gt(a, b, bool_f)` | Boolean: `a > b` |
 | `gte(a, b, bool_f)` | Boolean: `a >= b` |
+| `a == b`, `a != b`, `a < b`, … | Same as above but `bool_f` is inferred from `a.forest` (requires `MDDForestInt`) |
 | `land(a, b)` | Logical AND of two boolean edges |
 | `lor(a, b)` | Logical OR of two boolean edges |
 | `lnot(a)` | Logical complement of a boolean edge |
 | `copy_edge(e, target_f)` | Copy edge into another forest (e.g., boolean → integer) |
-| `ifthenelse(cond, t, e)` | Pointwise `cond ? t : e`; boolean `cond` is auto-converted |
+| `ifthenelse(cond, t, e)` | Pointwise `cond ? t : e`; boolean `cond` uses C++ ITE, integer `cond` uses arithmetic |
+| `@match(c1 => v1, …, _ => vd)` | Nested `ifthenelse`; `&&`/`\|\|` rewritten to `land`/`lor` |
 | `cardinality(e)` | Number of non-zero minterms (Float64) |
 | `is_empty(e)` | True iff the edge represents the all-zero / empty function |
 | `todot(e)` | Graphviz DOT string for the decision diagram |
@@ -380,7 +427,7 @@ write(stdout, todot(e)); cleanup()
 | `level_size(f, k)` | Domain size (number of values) for the variable at level k |
 | `is_terminal(node)` | True if handle ≤ 0 (no forest pointer required) |
 | `node_level(f, node)` | Level: 0 for terminals, 1..K for internal nodes |
-| `terminal_value(f, node)` | Decoded terminal value: `Bool` or `Int` |
+| `terminal_value(f, node)` | Decoded terminal value: `Bool` (`MDDForestBool`) or `Int` (`MDDForestInt`) |
 | `node_children(f, node)` | Dense `Vector{NodeHandle}` of all children |
 
 ---
@@ -390,7 +437,7 @@ write(stdout, todot(e)); cleanup()
 ```
 Julia user code
       │
-      │  (Julia structs: Domain, Forest, Edge)
+      │  (AbstractForest / MDDForestBool / MDDForestInt / Domain / Edge)
       │
 src/highlevel.jl   ← public API
 src/types.jl       ← mutable structs + GC finalizers
@@ -405,10 +452,15 @@ c/meddly_c.cpp     ← C ABI shim (extern "C"; all C++ exceptions caught)
 deps/usr/lib/libmeddly.a   ← MEDDLY 0.18.x built by Pkg.build
 ```
 
-Memory ownership: each Julia struct holds a `Ptr{Cvoid}` to a C++-heap object;
-its finalizer calls the matching `meddly_*_destroy` function.  Each child also
-holds a reference to its parent (`Edge → Forest → Domain`) so the parent cannot
-be GC'd while the child is alive.
+**Type hierarchy:**
+- `abstract type AbstractForest` — dispatch supertype
+- `MDDForestBool <: AbstractForest` — boolean multi-terminal MDD
+- `MDDForestInt <: AbstractForest` — integer multi-terminal MDD; owns an eagerly created `bool_forest::MDDForestBool` enabling `==`, `<`, etc. without extra arguments
+
+**Memory ownership:** each Julia struct holds a `Ptr{Cvoid}` to a C++-heap
+object; its finalizer calls the matching `meddly_*_destroy` function.  Each
+child holds a reference to its parent (`Edge → AbstractForest → Domain`) so
+the parent cannot be GC'd while the child is alive.
 
 ---
 

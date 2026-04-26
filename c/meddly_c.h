@@ -124,6 +124,14 @@ int meddly_edge_apply_binary_rf(int op_id, void* a, void* b,
  * Primary use: convert a boolean-forest edge to an integer-forest edge (false→0, true→1). */
 int meddly_edge_copy(void* src_edge, void* dst_forest, void** result);
 
+/* IF-THEN-ELSE ternary operation.
+ * cond   : boolean-forest edge (condition)
+ * then_e : integer-forest edge (value when cond is true)
+ * else_e : integer-forest edge in the same forest as then_e (value when false)
+ * result : new integer-forest edge  (caller must destroy)
+ * Implemented via MEDDLY ternary_operation with a compute table. */
+int meddly_edge_ifthenelse(void* cond, void* then_e, void* else_e, void** result);
+
 /* ------------------------------------------------------------------ */
 /* Logical complement (boolean forests only)                            */
 /* ------------------------------------------------------------------ */

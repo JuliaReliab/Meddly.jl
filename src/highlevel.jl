@@ -111,7 +111,7 @@ Base.min(a::Edge, b::Edge) = _apply_binary(_OP_MINIMUM, a, b)
 # Comparison operators (result in a boolean forest)                    #
 # ------------------------------------------------------------------ #
 
-function _compare(op_id::Cint, a::Edge, b::Edge, rf::Forest)
+function _compare(op_id::Cint, a::Edge, b::Edge, rf::AbstractForest)
     ret, ptr = _ll_edge_apply_binary_rf(op_id, a.ptr, b.ptr, rf.ptr)
     _check(ret)
     _make_edge(ptr, rf)
@@ -121,44 +121,44 @@ end
     eq(a, b, bool_forest)  →  Edge
 
 Pointwise equality: boolean edge true where `a == b`.
-`bool_forest` must be a boolean `Forest` over the same domain as `a` and `b`.
+`bool_forest` must be a `MDDForestBool` over the same domain as `a` and `b`.
 """
-eq(a::Edge, b::Edge, rf::Forest)  = _compare(_OP_EQUAL,              a, b, rf)
+eq(a::Edge, b::Edge, rf::AbstractForest)  = _compare(_OP_EQUAL,              a, b, rf)
 
 """
     neq(a, b, bool_forest)  →  Edge
 
 Pointwise inequality: boolean edge true where `a != b`.
 """
-neq(a::Edge, b::Edge, rf::Forest) = _compare(_OP_NOT_EQUAL,          a, b, rf)
+neq(a::Edge, b::Edge, rf::AbstractForest) = _compare(_OP_NOT_EQUAL,          a, b, rf)
 
 """
     lt(a, b, bool_forest)  →  Edge
 
 Pointwise less-than: boolean edge true where `a < b`.
 """
-lt(a::Edge, b::Edge, rf::Forest)  = _compare(_OP_LESS_THAN,          a, b, rf)
+lt(a::Edge, b::Edge, rf::AbstractForest)  = _compare(_OP_LESS_THAN,          a, b, rf)
 
 """
     lte(a, b, bool_forest)  →  Edge
 
 Pointwise less-than-or-equal: boolean edge true where `a <= b`.
 """
-lte(a::Edge, b::Edge, rf::Forest) = _compare(_OP_LESS_THAN_EQUAL,    a, b, rf)
+lte(a::Edge, b::Edge, rf::AbstractForest) = _compare(_OP_LESS_THAN_EQUAL,    a, b, rf)
 
 """
     gt(a, b, bool_forest)  →  Edge
 
 Pointwise greater-than: boolean edge true where `a > b`.
 """
-gt(a::Edge, b::Edge, rf::Forest)  = _compare(_OP_GREATER_THAN,       a, b, rf)
+gt(a::Edge, b::Edge, rf::AbstractForest)  = _compare(_OP_GREATER_THAN,       a, b, rf)
 
 """
     gte(a, b, bool_forest)  →  Edge
 
 Pointwise greater-than-or-equal: boolean edge true where `a >= b`.
 """
-gte(a::Edge, b::Edge, rf::Forest) = _compare(_OP_GREATER_THAN_EQUAL, a, b, rf)
+gte(a::Edge, b::Edge, rf::AbstractForest) = _compare(_OP_GREATER_THAN_EQUAL, a, b, rf)
 
 # ------------------------------------------------------------------ #
 # Named logical operators for boolean-forest edges                     #
@@ -196,37 +196,66 @@ end
 # ------------------------------------------------------------------ #
 
 """
-    copy_edge(e::Edge, target::Forest)  →  Edge
+    copy_edge(e::Edge, target::AbstractForest)  →  Edge
 
 Copy `e` into `target` (same domain, different range type).
 Primary use: convert a boolean-forest edge to an integer-forest edge
 (false → 0, true → 1), enabling it to drive arithmetic operations.
 """
-function copy_edge(e::Edge, target::Forest)
+function copy_edge(e::Edge, target::AbstractForest)
     ret, ptr = _ll_edge_copy(e.ptr, target.ptr)
     _check(ret)
     _make_edge(ptr, target)
 end
 
 """
+    bool_forest(f::AbstractForest) → MDDForestBool
+
+Return the boolean forest associated with `f`.
+For `MDDForestBool` returns `f` itself; for `MDDForestInt` returns the
+eagerly-created paired `bool_forest` field.
+"""
+bool_forest(f::MDDForestBool) = f
+bool_forest(f::MDDForestInt)  = f.bool_forest
+
+"""
     ifthenelse(c::Edge, t::Edge, e::Edge)  →  Edge
 
-Pointwise conditional: returns `t` where `c` is non-zero, `e` elsewhere.
+Pointwise conditional: returns `t` where `c` is true/non-zero, `e` elsewhere.
 
 `c` may be either:
-- a **boolean-forest** edge (result of a comparison or logical operator):
-  automatically converted to an integer 0/1 edge via `copy_edge`.
-- an **integer-forest** edge with values in {0, 1}: used directly.
+- a **boolean-forest** edge (`MDDForestBool`): handled via the C++ `ite_mt`
+  ternary operation (direct DD traversal with MEDDLY compute table).
+- an **integer-forest** edge (`MDDForestInt`) with values in {0, 1}: falls
+  back to the arithmetic formula `c * t + (1 − c) * e`.
 
 `t` and `e` must be in the same integer forest.
-
-Implemented as `c * t + (1 − c) * e` using MEDDLY's arithmetic operations.
 """
-function ifthenelse(c::Edge, t::Edge, e::Edge)
-    c_int = c.forest.range == :boolean ? copy_edge(c, t.forest) : c
-    one_e = Edge(t.forest, 1)
-    c_int * t + (one_e - c_int) * e
+ifthenelse(c::Edge, t::Edge, e::Edge) = _ifthenelse(c, c.forest, t, e)
+
+function _ifthenelse(c::Edge, ::MDDForestBool, t::Edge, e::Edge)
+    ret, ptr = _ll_edge_ifthenelse(c.ptr, t.ptr, e.ptr)
+    _check(ret)
+    _make_edge(ptr, t.forest)
 end
+
+function _ifthenelse(c::Edge, ::MDDForestInt, t::Edge, e::Edge)
+    one_e = Edge(t.forest, 1)
+    c * t + (one_e - c) * e
+end
+
+# ------------------------------------------------------------------ #
+# Comparison operator overloads                                        #
+# ------------------------------------------------------------------ #
+# These infer the result boolean forest lazily from the operand forest,
+# so callers do not need to create and pass a separate boolean forest.
+
+Base.:(==)(a::Edge, b::Edge) = eq(a,  b,  bool_forest(a.forest))
+Base.:(!=)(a::Edge, b::Edge) = neq(a, b,  bool_forest(a.forest))
+Base.:(<)(a::Edge,  b::Edge) = lt(a,  b,  bool_forest(a.forest))
+Base.:(<=)(a::Edge, b::Edge) = lte(a, b,  bool_forest(a.forest))
+Base.:(>)(a::Edge,  b::Edge) = gt(a,  b,  bool_forest(a.forest))
+Base.:(>=)(a::Edge, b::Edge) = gte(a, b,  bool_forest(a.forest))
 
 # ------------------------------------------------------------------ #
 # Queries                                                              #
@@ -253,6 +282,65 @@ function todot(e::Edge)::String
     finally
         rm(dir; recursive = true, force = true)
     end
+end
+
+# ------------------------------------------------------------------ #
+# @match macro                                                         #
+# ------------------------------------------------------------------ #
+
+# Rewrite && → land, || → lor in condition expressions.
+_match_cond(x) = x
+function _match_cond(x::Expr)
+    if Meta.isexpr(x, :(&&))
+        Expr(:call, :land, (_match_cond(u) for u in x.args)...)
+    elseif Meta.isexpr(x, :(||))
+        Expr(:call, :lor, (_match_cond(u) for u in x.args)...)
+    else
+        x
+    end
+end
+
+function _match_build(cases)
+    x = cases[1]
+    Meta.isexpr(x, :call) && x.args[1] == :(=>) ||
+        throw(ArgumentError("@match: each arm must be `condition => value`, got: $x"))
+    cond, val = x.args[2], x.args[3]
+    if length(cases) == 1
+        # Last arm: `_ => default` or `cond => val` (no fallback)
+        if cond == :(_)
+            return _match_cond(val)
+        else
+            # No wildcard — wrap with ifthenelse; else branch is nothing
+            return Expr(:call, :ifthenelse, _match_cond(cond), _match_cond(val), :nothing)
+        end
+    else
+        return Expr(:call, :ifthenelse,
+                    _match_cond(cond),
+                    _match_cond(val),
+                    _match_build(cases[2:end]))
+    end
+end
+
+"""
+    @match(cond1 => val1, cond2 => val2, ..., _ => default)
+
+Pattern-match macro that expands into nested `ifthenelse` calls.
+
+Each arm is `condition => value`.  The last arm should use `_` as the
+catch-all condition.  `&&` and `||` in conditions are automatically
+rewritten to `land` and `lor`.
+
+```julia
+result = @match(
+    gt(ea, eb, bool_f)            => ea,
+    gt(ec, ea, bool_f)            => ec,
+    gt(ea, eb, bool_f) && flag_c  => ed,
+    _                             => zero_edge
+)
+```
+"""
+macro match(cases...)
+    esc(_match_build(cases))
 end
 
 """
@@ -299,21 +387,21 @@ Return the root node handle of edge `e`.
 root_node(e::Edge) = NodeHandle(_ll_edge_get_node(e.ptr))
 
 """
-    num_vars(f::Forest) → Int
+    num_vars(f::AbstractForest) → Int
 
 Return the number of variables `K` in the forest's domain.
 Internal nodes have levels 1 (bottom variable) through `K` (top variable).
 """
-num_vars(f::Forest) = Int(_ll_forest_num_vars(f.ptr))
+num_vars(f::AbstractForest) = Int(_ll_forest_num_vars(f.ptr))
 
 """
-    level_size(f::Forest, level::Int) → Int
+    level_size(f::AbstractForest, level::Int) → Int
 
 Return the domain size (number of distinct values 0..size-1) for the
 variable at `level` (1-indexed).  An internal node at `level` has exactly
 this many children, one per variable value.
 """
-level_size(f::Forest, level::Int) =
+level_size(f::AbstractForest, level::Int) =
     Int(_ll_forest_level_size(f.ptr, Cint(level)))
 
 """
@@ -325,34 +413,39 @@ This is a pure computation on the handle; no forest pointer is needed.
 is_terminal(node::NodeHandle) = node <= NodeHandle(0)
 
 """
-    node_level(f::Forest, node::NodeHandle) → Int
+    node_level(f::AbstractForest, node::NodeHandle) → Int
 
 Return the level of `node`: `0` for terminals, `1..K` for internal nodes.
 """
-node_level(f::Forest, node::NodeHandle) =
+node_level(f::AbstractForest, node::NodeHandle) =
     Int(_ll_node_level(f.ptr, Cint(node)))
 
 """
-    terminal_value(f::Forest, node::NodeHandle) → Bool | Int
+    terminal_value(f::MDDForestBool, node::NodeHandle) → Bool
 
-Return the value encoded in terminal `node`:
-- Boolean forest → `Bool` (`false` or `true`).
-- Integer forest  → `Int`.
-
+Return the boolean value encoded in terminal `node`.
 Throws if `node` is not a terminal.
 """
-function terminal_value(f::Forest, node::NodeHandle)
+function terminal_value(f::MDDForestBool, node::NodeHandle)
     is_terminal(node) ||
         error("terminal_value: node $(node) is not a terminal")
-    if f.range == :boolean
-        _ll_node_bool_value(f.ptr, Cint(node))
-    else
-        _ll_node_int_value(f.ptr, Cint(node))
-    end
+    _ll_node_bool_value(f.ptr, Cint(node))
 end
 
 """
-    node_children(f::Forest, node::NodeHandle) → Vector{NodeHandle}
+    terminal_value(f::MDDForestInt, node::NodeHandle) → Int
+
+Return the integer value encoded in terminal `node`.
+Throws if `node` is not a terminal.
+"""
+function terminal_value(f::MDDForestInt, node::NodeHandle)
+    is_terminal(node) ||
+        error("terminal_value: node $(node) is not a terminal")
+    _ll_node_int_value(f.ptr, Cint(node))
+end
+
+"""
+    node_children(f::AbstractForest, node::NodeHandle) → Vector{NodeHandle}
 
 Return the dense child array of internal `node`.
 
@@ -378,7 +471,7 @@ end
 
 Throws if `node` is a terminal.
 """
-function node_children(f::Forest, node::NodeHandle)
+function node_children(f::AbstractForest, node::NodeHandle)
     is_terminal(node) &&
         error("node_children: node $(node) is a terminal")
     lv  = node_level(f, node)

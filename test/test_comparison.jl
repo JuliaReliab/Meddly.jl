@@ -2,8 +2,8 @@
 
 @testset "Comparison operators" begin
     dom    = Domain([4, 4])
-    bool_f = Forest(dom)
-    int_f  = Forest(dom; range = :integer)
+    bool_f = MDDForestBool(dom)
+    int_f  = MDDForestInt(dom)
 
     ea = Edge(int_f, [1, 2], 5)   # (1,2) → 5
     eb = Edge(int_f, [1, 2], 3)   # (1,2) → 3
@@ -40,10 +40,56 @@
     @test cardinality(c_lte) ≈ 15.0
 end
 
+@testset "Comparison operator overloads (no explicit bool_f)" begin
+    dom   = Domain([4, 4])
+    int_f = MDDForestInt(dom)
+
+    ea = Edge(int_f, [1, 2], 5)
+    eb = Edge(int_f, [1, 2], 3)
+
+    # Boolean forest is created lazily; result matches the explicit version
+    bool_f = MDDForestBool(dom)
+    @test cardinality(ea >  eb)  ≈ cardinality(gt(ea,  eb, bool_f))
+    @test cardinality(ea <  eb)  ≈ cardinality(lt(ea,  eb, bool_f))
+    @test cardinality(ea == eb)  ≈ cardinality(eq(ea,  eb, bool_f))
+    @test cardinality(ea != eb)  ≈ cardinality(neq(ea, eb, bool_f))
+    @test cardinality(ea >= eb)  ≈ cardinality(gte(ea, eb, bool_f))
+    @test cardinality(ea <= eb)  ≈ cardinality(lte(ea, eb, bool_f))
+
+    # Paired bool forest is eagerly created and is a MDDForestBool
+    @test int_f.bool_forest isa MDDForestBool
+    bf1 = int_f.bool_forest
+    _ = (ea > eb)
+    @test int_f.bool_forest === bf1   # same object every time
+end
+
+@testset "ifthenelse via C++ ternary (boolean condition)" begin
+    dom   = Domain([4, 4])
+    int_f = MDDForestInt(dom)
+
+    ea = Edge(int_f, [1, 2], 5)
+    eb = Edge(int_f, [1, 2], 3)
+    ec = Edge(int_f, [2, 3], 7)
+
+    # ea > eb is true at (1,2); ec > ea is true at (2,3)
+    cond = ea > eb
+    @test cond.forest isa MDDForestBool
+
+    result = @test_nowarn ifthenelse(cond, ea, ec)
+    @test result.ptr != C_NULL
+    # (1,2)→5, (2,3)→7 → cardinality 2
+    @test cardinality(result) ≈ 2.0
+
+    # Chained conditions via land
+    c2 = land(ea > eb, lnot(ec > ea))  # true only at (1,2)
+    result2 = ifthenelse(c2, ea, ec)
+    @test cardinality(result2) ≈ 2.0   # (1,2)→ea=5, (2,3)→ec=7
+end
+
 @testset "copy_edge (bool → int)" begin
     dom    = Domain([4, 4])
-    bool_f = Forest(dom)
-    int_f  = Forest(dom; range = :integer)
+    bool_f = MDDForestBool(dom)
+    int_f  = MDDForestInt(dom)
 
     ea = Edge(int_f, [1, 2], 5)
     eb = Edge(int_f, [1, 2], 3)

@@ -1,15 +1,16 @@
 module Meddly
 
 export initialize, cleanup
-export Domain, Forest, Edge
+export Domain, AbstractForest, MDDForestBool, MDDForestInt, Edge
 export cardinality, is_empty
 export eq, neq, lt, lte, gt, gte
 export land, lor, lnot
-export copy_edge, ifthenelse
+export bool_forest, copy_edge, ifthenelse
 export todot
 export NodeHandle
 export root_node, num_vars, level_size
 export is_terminal, node_level, terminal_value, node_children
+export @match
 
 # Load the library path written by deps/build.jl.
 # Falls back to LIBMEDDLY_C_PATH env var (or bare name) when the package

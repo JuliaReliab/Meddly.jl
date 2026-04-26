@@ -52,35 +52,36 @@ const _OP_GREATER_THAN       = Cint(19)
 const _OP_GREATER_THAN_EQUAL = Cint(20)
 
 # ------------------------------------------------------------------ #
-# Forest                                                               #
+# AbstractForest and concrete forest types                             #
 # ------------------------------------------------------------------ #
 
-mutable struct Forest
+"""
+    AbstractForest
+
+Abstract supertype for all MDD forest types.  Concrete subtypes:
+- `MDDForestBool` — multi-terminal boolean MDD forest
+- `MDDForestInt`  — multi-terminal integer MDD forest
+"""
+abstract type AbstractForest end
+
+function _kind_int(kind::Symbol)
+    kind == :mdd && return _FOREST_MDD
+    kind == :mxd && return _FOREST_MXD
+    error("Unknown forest kind :$kind  (expected :mdd or :mxd)")
+end
+
+"""
+    MDDForestBool(domain; kind = :mdd)
+
+Boolean multi-terminal MDD forest over `domain`.
+"""
+mutable struct MDDForestBool <: AbstractForest
     ptr::Ptr{Cvoid}
-    domain::Domain   # keep domain alive as long as forest is alive
-    range::Symbol    # :boolean or :integer
+    domain::Domain
 
-    function Forest(domain::Domain;
-                    kind::Symbol  = :mdd,
-                    range::Symbol = :boolean)
-        kind_int = if kind == :mdd
-            _FOREST_MDD
-        elseif kind == :mxd
-            _FOREST_MXD
-        else
-            error("Unknown forest kind :$kind  (expected :mdd or :mxd)")
-        end
-
-        range_int = if range == :boolean
-            _RANGE_BOOLEAN
-        elseif range == :integer
-            _RANGE_INTEGER
-        else
-            error("Unknown forest range :$range  (expected :boolean or :integer)")
-        end
-
-        ptr = _check_ptr(_ll_forest_create(domain.ptr, kind_int, range_int))
-        f = new(ptr, domain, range)
+    function MDDForestBool(domain::Domain; kind::Symbol = :mdd)
+        ptr = _check_ptr(_ll_forest_create(domain.ptr, _kind_int(kind), _RANGE_BOOLEAN))
+        f = new(ptr, domain)
         finalizer(f) do x
             if x.ptr != C_NULL
                 _ll_forest_destroy(x.ptr)
@@ -91,8 +92,40 @@ mutable struct Forest
     end
 end
 
-Base.show(io::IO, f::Forest) =
-    print(io, "Forest(", f.ptr == C_NULL ? "destroyed" : string(f.ptr), ")")
+Base.show(io::IO, f::MDDForestBool) =
+    print(io, "MDDForestBool(", f.ptr == C_NULL ? "destroyed" : string(f.ptr), ")")
+
+"""
+    MDDForestInt(domain; kind = :mdd)
+
+Integer multi-terminal MDD forest over `domain`.
+
+A paired boolean forest (`bool_forest::MDDForestBool`) over the same domain
+is created automatically and stored as a field, enabling comparison operator
+overloads (`==`, `<`, etc.) without requiring a separate forest argument.
+"""
+mutable struct MDDForestInt <: AbstractForest
+    ptr::Ptr{Cvoid}
+    domain::Domain
+    bool_forest::MDDForestBool  # paired boolean forest (eagerly created)
+
+    function MDDForestInt(domain::Domain; kind::Symbol = :mdd)
+        k   = _kind_int(kind)
+        ptr = _check_ptr(_ll_forest_create(domain.ptr, k, _RANGE_INTEGER))
+        bf  = MDDForestBool(domain; kind = kind)
+        f   = new(ptr, domain, bf)
+        finalizer(f) do x
+            if x.ptr != C_NULL
+                _ll_forest_destroy(x.ptr)
+                x.ptr = C_NULL
+            end
+        end
+        f
+    end
+end
+
+Base.show(io::IO, f::MDDForestInt) =
+    print(io, "MDDForestInt(", f.ptr == C_NULL ? "destroyed" : string(f.ptr), ")")
 
 # ------------------------------------------------------------------ #
 # Edge                                                                 #
@@ -100,15 +133,15 @@ Base.show(io::IO, f::Forest) =
 
 mutable struct Edge
     ptr::Ptr{Cvoid}
-    forest::Forest   # keep forest (and transitively domain) alive
+    forest::AbstractForest  # keep forest (and transitively domain) alive
 
     # Raw constructor: just stores fields, no finalizer.
     # Use _make_edge() or the public Edge(forest[, values]) constructors instead.
-    Edge(ptr::Ptr{Cvoid}, forest::Forest) = new(ptr, forest)
+    Edge(ptr::Ptr{Cvoid}, forest::AbstractForest) = new(ptr, forest)
 end
 
 # Internal factory: wraps a raw C pointer and registers the finalizer.
-function _make_edge(ptr::Ptr{Cvoid}, forest::Forest)
+function _make_edge(ptr::Ptr{Cvoid}, forest::AbstractForest)
     e = Edge(ptr, forest)
     finalizer(e) do x
         if x.ptr != C_NULL
@@ -120,14 +153,14 @@ function _make_edge(ptr::Ptr{Cvoid}, forest::Forest)
 end
 
 # Create an edge initialized to the empty set.
-function Edge(forest::Forest)
+function Edge(forest::AbstractForest)
     ptr = _check_ptr(_ll_edge_create(forest.ptr))
     _make_edge(ptr, forest)
 end
 
 # Create an edge representing the single minterm given by values (boolean forest).
 # values[i] is the assignment for variable i (1-indexed Julia convention).
-function Edge(forest::Forest, values::Vector{Int})
+function Edge(forest::AbstractForest, values::Vector{Int})
     isempty(values) && error("values must not be empty")
     vals = Cint.(values)
     ptr  = _check_ptr(_ll_edge_create_from_values(forest.ptr, vals))
@@ -135,14 +168,14 @@ function Edge(forest::Forest, values::Vector{Int})
 end
 
 # Create a constant integer-valued edge: all variable assignments → value.
-function Edge(forest::Forest, value::Integer)
+function Edge(forest::AbstractForest, value::Integer)
     ptr = _check_ptr(_ll_edge_create_constant_int(forest.ptr, Int64(value)))
     _make_edge(ptr, forest)
 end
 
 # Create a single-minterm integer edge: vars → value, 0 everywhere else.
 # vars[i] is the assignment for variable i (1-indexed Julia convention).
-function Edge(forest::Forest, vars::Vector{Int}, value::Integer)
+function Edge(forest::AbstractForest, vars::Vector{Int}, value::Integer)
     isempty(vars) && error("vars must not be empty")
     vs  = Cint.(vars)
     ptr = _check_ptr(_ll_edge_create_from_minterm_int(forest.ptr, vs, Int64(value)))

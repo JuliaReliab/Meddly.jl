@@ -2,7 +2,7 @@
 
 @testset "Edge — empty" begin
     dom = Domain([2, 2, 2])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
     e   = @test_nowarn Edge(f)
     @test e.ptr != C_NULL
     @test is_empty(e)
@@ -11,7 +11,7 @@ end
 
 @testset "Edge — from values" begin
     dom = Domain([2, 2, 2])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
     # Single minterm: variable 1 = 0, variable 2 = 1, variable 3 = 0
     e = @test_nowarn Edge(f, [0, 1, 0])
     @test e.ptr != C_NULL
@@ -21,7 +21,7 @@ end
 
 @testset "union / intersection / difference" begin
     dom = Domain([2, 2, 2])
-    f   = Forest(dom)
+    f   = MDDForestBool(dom)
 
     e1 = Edge(f, [0, 0, 0])   # element {(0,0,0)}
     e2 = Edge(f, [1, 0, 0])   # element {(1,0,0)}

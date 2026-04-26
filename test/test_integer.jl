@@ -2,7 +2,7 @@
 
 @testset "Integer forest — edge creation" begin
     dom = Domain([4, 4])   # 2 variables, each 0..3  (16 total minterms)
-    f   = Forest(dom; range = :integer)
+    f   = MDDForestInt(dom)
 
     # Constant edge: all minterms → 5
     c5 = @test_nowarn Edge(f, 5)
@@ -24,7 +24,7 @@ end
 
 @testset "Integer forest — arithmetic" begin
     dom = Domain([4, 4])
-    f   = Forest(dom; range = :integer)
+    f   = MDDForestInt(dom)
 
     # Two single-minterm edges at the same point
     ea = Edge(f, [1, 2], 5)   # (1,2) → 5

@@ -16,8 +16,11 @@
 #include "meddly_c.h"
 #include <meddly/meddly.h>
 #include <meddly/io_dot.h>
+#include <meddly/oper_ternary.h>
+#include <meddly/unpacked_node.h>
 #include <cstring>
 #include <stdexcept>
+#include <algorithm>
 
 /* ------------------------------------------------------------------ */
 static char g_last_error[1024] = "no error";
@@ -410,6 +413,152 @@ int meddly_edge_complement(void* a, void** result) {
     } catch (const MEDDLY::error& e) { set_error(e.getName()); }
       catch (const std::exception& e) { set_error(e.what()); }
       catch (...) { set_error("unknown exception in meddly_edge_complement"); }
+    return MEDDLY_C_ERR_EXCEPT;
+}
+
+/* ------------------------------------------------------------------ */
+/* IF-THEN-ELSE ternary operation                                       */
+/* ------------------------------------------------------------------ */
+
+namespace {
+
+MEDDLY::ternary_list ite_mt_cache("ite_mt");
+
+class ite_mt : public MEDDLY::ternary_operation {
+
+    MEDDLY::ct_entry_key* findResult(MEDDLY::node_handle c,
+                                      MEDDLY::node_handle t,
+                                      MEDDLY::node_handle e,
+                                      MEDDLY::node_handle& result)
+    {
+        MEDDLY::ct_entry_key* key = CT0->useEntryKey(etype[0], 0);
+        key->writeN(c);
+        key->writeN(t);
+        key->writeN(e);
+        CT0->find(key, CTresult[0]);
+        if (!CTresult[0]) return key;
+        result = resF->linkNode(CTresult[0].readN());
+        CT0->recycle(key);
+        return nullptr;
+    }
+
+    void saveResult(MEDDLY::ct_entry_key* key,
+                    MEDDLY::node_handle c,
+                    MEDDLY::node_handle t,
+                    MEDDLY::node_handle e,
+                    MEDDLY::node_handle result)
+    {
+        CTresult[0].reset();
+        CTresult[0].writeN(result);
+        CT0->addEntry(key, CTresult[0]);
+    }
+
+    void compute_rec(MEDDLY::node_handle c,
+                     MEDDLY::node_handle t,
+                     MEDDLY::node_handle e,
+                     MEDDLY::node_handle& result)
+    {
+        using namespace MEDDLY;
+        // Terminal case: c is a boolean terminal
+        if (arg1F->isTerminalNode(c)) {
+            result = resF->linkNode(arg1F->getBooleanFromHandle(c) ? t : e);
+            return;
+        }
+        ct_entry_key* key = findResult(c, t, e, result);
+        if (!key) return;  // cache hit
+
+        int lv_c = arg1F->getNodeLevel(c);
+        int lv_t = arg2F->getNodeLevel(t);  // 0 for terminals
+        int lv_e = arg3F->getNodeLevel(e);
+        int lv   = std::max({lv_c, lv_t, lv_e});
+
+        unpacked_node* nb = unpacked_node::newWritable(resF, lv, FULL_ONLY);
+        unpacked_node* cu = (lv_c < lv)
+            ? unpacked_node::newRedundant(arg1F, lv, c, FULL_ONLY)
+            : unpacked_node::newFromNode(arg1F, c, FULL_ONLY);
+        unpacked_node* tu = (lv_t < lv)
+            ? unpacked_node::newRedundant(arg2F, lv, t, FULL_ONLY)
+            : unpacked_node::newFromNode(arg2F, t, FULL_ONLY);
+        unpacked_node* eu = (lv_e < lv)
+            ? unpacked_node::newRedundant(arg3F, lv, e, FULL_ONLY)
+            : unpacked_node::newFromNode(arg3F, e, FULL_ONLY);
+
+        for (unsigned i = 0; i < nb->getSize(); i++) {
+            node_handle child;
+            compute_rec(cu->down(i), tu->down(i), eu->down(i), child);
+            nb->setFull(i, child);
+        }
+        unpacked_node::Recycle(eu);
+        unpacked_node::Recycle(tu);
+        unpacked_node::Recycle(cu);
+
+        edge_value dummy;
+        resF->createReducedNode(nb, dummy, result);
+        saveResult(key, c, t, e, result);
+    }
+
+public:
+    ite_mt(MEDDLY::ternary_list& lst,
+           MEDDLY::forest* bool_f,
+           MEDDLY::forest* then_f,
+           MEDDLY::forest* else_f,
+           MEDDLY::forest* res_f)
+        : ternary_operation(lst, 1, bool_f, then_f, else_f, res_f)
+    {
+        using namespace MEDDLY;
+        ct_entry_type* et = new ct_entry_type(lst.getName(), "NNN:N");
+        et->setForestForSlot(0, arg1F);
+        et->setForestForSlot(1, arg2F);
+        et->setForestForSlot(2, arg3F);
+        et->setForestForSlot(4, resF);
+        registerEntryType(0, et);
+        buildCTs();
+    }
+
+    virtual void computeDDEdge(const MEDDLY::dd_edge& c,
+                                const MEDDLY::dd_edge& t,
+                                const MEDDLY::dd_edge& e,
+                                MEDDLY::dd_edge& res,
+                                bool) override
+    {
+        MEDDLY::node_handle result = 0;
+        compute_rec(c.getNode(), t.getNode(), e.getNode(), result);
+        res.set(result);
+    }
+};
+
+MEDDLY::ternary_operation* ITE_MT(MEDDLY::forest* bool_f,
+                                   MEDDLY::forest* then_f,
+                                   MEDDLY::forest* else_f,
+                                   MEDDLY::forest* res_f)
+{
+    MEDDLY::ternary_operation* op =
+        ite_mt_cache.find(bool_f, then_f, else_f, res_f);
+    if (op) return op;
+    return ite_mt_cache.add(
+        new ite_mt(ite_mt_cache, bool_f, then_f, else_f, res_f));
+}
+
+} // anonymous namespace
+
+int meddly_edge_ifthenelse(void* cond, void* then_e, void* else_e,
+                            void** result) {
+    if (!cond || !then_e || !else_e || !result) {
+        set_error("meddly_edge_ifthenelse: null argument");
+        return MEDDLY_C_ERR_NULL;
+    }
+    try {
+        MEDDLY::dd_edge* ec  = static_cast<MEDDLY::dd_edge*>(cond);
+        MEDDLY::dd_edge* et  = static_cast<MEDDLY::dd_edge*>(then_e);
+        MEDDLY::dd_edge* ee  = static_cast<MEDDLY::dd_edge*>(else_e);
+        MEDDLY::forest*  rf  = et->getForest();
+        MEDDLY::dd_edge* res = new MEDDLY::dd_edge(rf);
+        MEDDLY::apply(ITE_MT, *ec, *et, *ee, *res);
+        *result = static_cast<void*>(res);
+        return MEDDLY_C_OK;
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_edge_ifthenelse"); }
     return MEDDLY_C_ERR_EXCEPT;
 }
 
