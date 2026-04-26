@@ -1,6 +1,4 @@
-# TODO — EV+MDD 対応の未解決問題
-
-EV+MDD / EV×MDD 操作を実装しようとしたが，MEDDLY の内部挙動に起因する根本的な問題が複数あることが判明した。以下にまとめる。
+# TODO — 未解決問題・将来の改善候補
 
 ---
 
@@ -52,7 +50,7 @@ if (OMEGA_INFINITY == bn) return (!f2->isIdentityReduced());
 `c_int * t + nc_int * e` 式は正しく動作しない。
 
 > **注:** MT (multi-terminal) 整数フォレストの `ifthenelse` はすでに解決済み。
-> `MDDForestBool` 条件の場合は C++ `ite_mt` ternary operation（compute table 付き）、
+> `MDDForestBool` 条件の場合は C++ `ite_mt` ternary operation（compute table 付き），
 > `MDDForestInt` 条件の場合は算術フォールバック `c * t + (1-c) * e` を使う。
 > 上記の問題は EV+MDD に限定される。
 
@@ -94,7 +92,7 @@ t・e をあらかじめ OMEGA_NORMAL(0) 背景（dense）で構築した上で
 | `c/meddly_c.cpp` | `meddly_edge_ifthenelse_ev` の実装（DD 直接走査・OMEGA_INFINITY 回避） |
 | `src/lowlevel.jl` | `_ll_edge_ifthenelse_ev` ccall ラッパー |
 | `src/types.jl` | `MDDForestEVPlus <: AbstractForest` など EV+MDD 向け型の追加 |
-| `src/highlevel.jl` | EV+MDD 向け `ifthenelse` の特殊パス（`_ifthenelse(c, ::MDDForestEVPlus, t, e)`）|
+| `src/highlevel.jl` | EV+MDD 向け `ifthenelse` の特殊パス |
 | `test/runtests.jl` | EV+MDD ifthenelse テストの追加 |
 
 ---
@@ -102,7 +100,11 @@ t・e をあらかじめ OMEGA_NORMAL(0) 背景（dense）で構築した上で
 ## 5. その他 — 将来の改善候補
 
 - **ミンターム反復 API**: `foreach_minterm(f, e, callback)` — DD を走査して
-  各ミンタームをコールバックで返す。現状は traversal API で自前実装が必要。
+  各ミンタームをコールバックで返す。現状は traversal API で自前実装が必要
+  （README の `collect_minterms` 例を参照）。
 - **JLL アーティファクト**: `libmeddly_c` のビルド済みバイナリを JLL パッケージとして
   配布することで `Pkg.build` 不要にできる。
 - **MxD（関係フォレスト）テスト**: `kind = :mxd` は配線済みだが最小限しかテストされていない。
+- **`var!` 構築の高速化**: 現状は他変数の全組み合わせを反復して単一ミンターム Edge を
+  足し合わせるため，変数数・定義域サイズが大きいと遅い。MEDDLY の内部 API で
+  直接ノードを構築できれば O(domain_size) に削減できる。
