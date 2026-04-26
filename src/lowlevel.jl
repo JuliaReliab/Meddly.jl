@@ -157,3 +157,36 @@ _ll_edge_cardinality(p::Ptr{Cvoid}) =
 
 _ll_edge_is_empty(p::Ptr{Cvoid}) =
     ccall((:meddly_edge_is_empty, libmeddly_c), Cint, (Ptr{Cvoid},), p) != Cint(0)
+
+# ------------------------------------------------------------------ #
+# Traversal / node inspection                                          #
+# ------------------------------------------------------------------ #
+
+_ll_edge_get_node(e::Ptr{Cvoid}) =
+    ccall((:meddly_edge_get_node, libmeddly_c), Cint, (Ptr{Cvoid},), e)
+
+_ll_forest_num_vars(f::Ptr{Cvoid}) =
+    ccall((:meddly_forest_num_vars, libmeddly_c), Cint, (Ptr{Cvoid},), f)
+
+_ll_forest_level_size(f::Ptr{Cvoid}, level::Cint) =
+    ccall((:meddly_forest_level_size, libmeddly_c), Cint,
+          (Ptr{Cvoid}, Cint), f, level)
+
+_ll_node_is_terminal(node::Cint) =
+    ccall((:meddly_node_is_terminal, libmeddly_c), Cint, (Cint,), node) != Cint(0)
+
+_ll_node_level(f::Ptr{Cvoid}, node::Cint) =
+    ccall((:meddly_node_level, libmeddly_c), Cint, (Ptr{Cvoid}, Cint), f, node)
+
+_ll_node_bool_value(f::Ptr{Cvoid}, node::Cint) =
+    ccall((:meddly_node_bool_value, libmeddly_c), Cint,
+          (Ptr{Cvoid}, Cint), f, node) != Cint(0)
+
+_ll_node_int_value(f::Ptr{Cvoid}, node::Cint) =
+    Int(ccall((:meddly_node_int_value, libmeddly_c), Clonglong,
+              (Ptr{Cvoid}, Cint), f, node))
+
+function _ll_node_get_children(f::Ptr{Cvoid}, node::Cint, out::Vector{Cint})
+    ccall((:meddly_node_get_children, libmeddly_c), Cint,
+          (Ptr{Cvoid}, Cint, Ptr{Cint}, Cint), f, node, out, length(out))
+end

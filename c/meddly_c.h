@@ -144,6 +144,43 @@ int meddly_edge_todot(void* edge, const char* basename);
 double meddly_edge_cardinality(void* edge);
 int    meddly_edge_is_empty(void* edge);   /* returns 1 if empty */
 
+/* ------------------------------------------------------------------ */
+/* Traversal / node inspection                                          */
+/* ------------------------------------------------------------------ */
+
+/* Root node handle of an edge.  Terminal nodes have handle <= 0:
+ *   MT-boolean: false=0, true=-1
+ *   MT-integer: zero=0, value v != 0 → v | INT_MIN  (sign bit set) */
+int meddly_edge_get_node(void* edge);
+
+/* Number of variables K (= max level index) in the forest. */
+int meddly_forest_num_vars(void* forest);
+
+/* Domain size at level k (1-indexed, 1..K).
+ * Equals the number of distinct values for the variable at that level. */
+int meddly_forest_level_size(void* forest, int level);
+
+/* Returns 1 if handle is a terminal node (handle <= 0), else 0.
+ * No forest pointer required; terminalness depends only on the handle. */
+int meddly_node_is_terminal(int node);
+
+/* Level of a node: 0 for terminals, 1..K for internal nodes. */
+int meddly_node_level(void* forest, int node);
+
+/* Terminal boolean value (0=false, 1=true).
+ * Only call on terminal nodes in boolean forests. */
+int meddly_node_bool_value(void* forest, int node);
+
+/* Terminal integer value.
+ * Only call on terminal nodes in integer forests. */
+long long meddly_node_int_value(void* forest, int node);
+
+/* Fill out[0..out_size-1] with the dense child array of an internal node.
+ * out[i] is the child node handle for variable value i (0-indexed).
+ * out_size must be >= level_size(forest, node_level(forest, node)).
+ * Returns the number of children written (= level size), or -1 on error. */
+int meddly_node_get_children(void* forest, int node, int* out, int out_size);
+
 #ifdef __cplusplus
 }
 #endif

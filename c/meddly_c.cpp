@@ -461,5 +461,82 @@ int meddly_edge_is_empty(void* edge) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Traversal / node inspection                                          */
+/* ------------------------------------------------------------------ */
+
+int meddly_edge_get_node(void* edge) {
+    if (!edge) return 0;
+    return static_cast<MEDDLY::dd_edge*>(edge)->getNode();
+}
+
+int meddly_forest_num_vars(void* forest) {
+    if (!forest) return 0;
+    return (int)static_cast<MEDDLY::forest*>(forest)->getNumVariables();
+}
+
+int meddly_forest_level_size(void* forest, int level) {
+    if (!forest) return -1;
+    try {
+        return static_cast<MEDDLY::forest*>(forest)->getLevelSize(level);
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_forest_level_size"); }
+    return -1;
+}
+
+int meddly_node_is_terminal(int node) {
+    return MEDDLY::forest::isTerminalNode(node) ? 1 : 0;
+}
+
+int meddly_node_level(void* forest, int node) {
+    if (!forest) return -1;
+    return static_cast<MEDDLY::forest*>(forest)->getNodeLevel(node);
+}
+
+int meddly_node_bool_value(void* forest, int node) {
+    if (!forest) return 0;
+    try {
+        return static_cast<MEDDLY::forest*>(forest)->getBooleanFromHandle(node) ? 1 : 0;
+    } catch (...) { return 0; }
+}
+
+long long meddly_node_int_value(void* forest, int node) {
+    if (!forest) return 0LL;
+    try {
+        return (long long)static_cast<MEDDLY::forest*>(forest)->getIntegerFromHandle(node);
+    } catch (...) { return 0LL; }
+}
+
+int meddly_node_get_children(void* forest, int node, int* out, int out_size) {
+    if (!forest || !out) {
+        set_error("meddly_node_get_children: null argument");
+        return -1;
+    }
+    if (MEDDLY::forest::isTerminalNode(node)) {
+        set_error("meddly_node_get_children: node is terminal");
+        return -1;
+    }
+    try {
+        MEDDLY::forest* f = static_cast<MEDDLY::forest*>(forest);
+        MEDDLY::unpacked_node* un =
+            MEDDLY::unpacked_node::newFromNode(f, node, MEDDLY::FULL_ONLY);
+        int sz = (int)un->getSize();
+        if (sz > out_size) {
+            MEDDLY::unpacked_node::Recycle(un);
+            set_error("meddly_node_get_children: out_size too small");
+            return -1;
+        }
+        for (int i = 0; i < sz; i++) {
+            out[i] = un->down(i);
+        }
+        MEDDLY::unpacked_node::Recycle(un);
+        return sz;
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_node_get_children"); }
+    return -1;
+}
+
+/* ------------------------------------------------------------------ */
 } // extern "C"
 /* ------------------------------------------------------------------ */

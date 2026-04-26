@@ -274,3 +274,117 @@ Return `true` if `e` represents the empty set.
 function is_empty(e::Edge)
     _ll_edge_is_empty(e.ptr)
 end
+
+# ------------------------------------------------------------------ #
+# Traversal                                                            #
+# ------------------------------------------------------------------ #
+
+"""
+    NodeHandle
+
+Integer type (`Int32`) used as a node identifier within a MEDDLY forest.
+Terminal nodes have handle ≤ 0; internal nodes have handle > 0.
+
+Terminal encoding for MT forests:
+- Boolean false → `0`;  boolean true → `-1` (= `Int32(-1)`).
+- Integer zero  → `0`;  integer value `v ≠ 0` → `Int32(v) | typemin(Int32)`.
+"""
+const NodeHandle = Int32
+
+"""
+    root_node(e::Edge) → NodeHandle
+
+Return the root node handle of edge `e`.
+"""
+root_node(e::Edge) = NodeHandle(_ll_edge_get_node(e.ptr))
+
+"""
+    num_vars(f::Forest) → Int
+
+Return the number of variables `K` in the forest's domain.
+Internal nodes have levels 1 (bottom variable) through `K` (top variable).
+"""
+num_vars(f::Forest) = Int(_ll_forest_num_vars(f.ptr))
+
+"""
+    level_size(f::Forest, level::Int) → Int
+
+Return the domain size (number of distinct values 0..size-1) for the
+variable at `level` (1-indexed).  An internal node at `level` has exactly
+this many children, one per variable value.
+"""
+level_size(f::Forest, level::Int) =
+    Int(_ll_forest_level_size(f.ptr, Cint(level)))
+
+"""
+    is_terminal(node::NodeHandle) → Bool
+
+Return `true` if `node` is a terminal node (handle ≤ 0).
+This is a pure computation on the handle; no forest pointer is needed.
+"""
+is_terminal(node::NodeHandle) = node <= NodeHandle(0)
+
+"""
+    node_level(f::Forest, node::NodeHandle) → Int
+
+Return the level of `node`: `0` for terminals, `1..K` for internal nodes.
+"""
+node_level(f::Forest, node::NodeHandle) =
+    Int(_ll_node_level(f.ptr, Cint(node)))
+
+"""
+    terminal_value(f::Forest, node::NodeHandle) → Bool | Int
+
+Return the value encoded in terminal `node`:
+- Boolean forest → `Bool` (`false` or `true`).
+- Integer forest  → `Int`.
+
+Throws if `node` is not a terminal.
+"""
+function terminal_value(f::Forest, node::NodeHandle)
+    is_terminal(node) ||
+        error("terminal_value: node $(node) is not a terminal")
+    if f.range == :boolean
+        _ll_node_bool_value(f.ptr, Cint(node))
+    else
+        _ll_node_int_value(f.ptr, Cint(node))
+    end
+end
+
+"""
+    node_children(f::Forest, node::NodeHandle) → Vector{NodeHandle}
+
+Return the dense child array of internal `node`.
+
+The vector has length `level_size(f, node_level(f, node))`.
+`children[i+1]` (1-based Julia index) is the child for variable value `i`
+(0-based MEDDLY index).
+
+In a fully-reduced MDD, the children's levels may be lower than
+`node_level(f, node) - 1` (skipped levels act as redundant nodes).
+Use `node_level` to determine the actual level of each child before
+recursing.
+
+Example — evaluate an integer MDD at a given variable assignment:
+```julia
+function evaluate(f, node, var_values)   # var_values[level] = value
+    while !is_terminal(node)
+        lv   = node_level(f, node)
+        node = node_children(f, node)[var_values[lv] + 1]
+    end
+    terminal_value(f, node)
+end
+```
+
+Throws if `node` is a terminal.
+"""
+function node_children(f::Forest, node::NodeHandle)
+    is_terminal(node) &&
+        error("node_children: node $(node) is a terminal")
+    lv  = node_level(f, node)
+    sz  = level_size(f, lv)
+    out = Vector{Cint}(undef, sz)
+    n   = _ll_node_get_children(f.ptr, Cint(node), out)
+    n < 0 && error("MEDDLY error in node_children: $(_last_error_msg())")
+    Vector{NodeHandle}(out)
+end
