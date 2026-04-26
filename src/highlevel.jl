@@ -618,18 +618,28 @@ end
     defvar!(b::MDDSession, name::Symbol, level::Int, domain)
 
 Register variable `name` at `level` (1-based; higher = closer to root) with
-the given integer domain values.  Must be called before any `var!` call.
+the given integer domain values.  Must be called before `compile!` or `var!`.
 """
 function defvar!(b::MDDSession, name::Symbol, level::Int,
                  domain::AbstractVector{<:Integer})
     b._int_forest !== nothing &&
-        error("defvar!: forests already created; define all variables before var!.")
+        error("defvar!: session already compiled; define all variables before compile!.")
     b._var_defs[name] = (level, collect(Int, domain))
     b._num_levels = max(b._num_levels, level)
 end
 
-function _ensure_forest!(b::MDDSession)
-    b._int_forest === nothing || return
+"""
+    compile!(b::MDDSession) → MDDSession
+
+Fix the variable configuration and create the underlying MEDDLY Domain and
+forests.  After this call, `defvar!` can no longer be used.
+
+Called automatically by `var!` on first use; calling it explicitly first makes
+the compilation step visible and confirms the configuration is complete.
+Returns `b` for method chaining.
+"""
+function compile!(b::MDDSession)
+    b._int_forest === nothing || return b
     isempty(b._var_defs) && error("No variables defined; call defvar! first.")
     K = b._num_levels
     level_sizes = zeros(Int, K)
@@ -638,11 +648,12 @@ function _ensure_forest!(b::MDDSession)
     end
     any(==(0), level_sizes) &&
         error("Levels $(findall(==(0), level_sizes)) have no variable assigned.")
-    dom           = Domain(level_sizes)
-    int_f         = MDDForestInt(dom)
-    b._domain     = dom
-    b._int_forest = int_f
+    dom            = Domain(level_sizes)
+    int_f          = MDDForestInt(dom)
+    b._domain      = dom
+    b._int_forest  = int_f
     b._bool_forest = int_f.bool_forest
+    b
 end
 
 """
@@ -654,9 +665,10 @@ variable at that point.
 
 Built by summing single-minterm edges over all variable combinations; MEDDLY's
 full reduction collapses the result to a compact projection node automatically.
+Calls `compile!` automatically if it has not been called yet.
 """
 function var!(b::MDDSession, name::Symbol)
-    _ensure_forest!(b)
+    compile!(b)
     haskey(b._var_defs, name) ||
         error("Variable :$name not defined; call defvar! first.")
     lv, dom = b._var_defs[name]

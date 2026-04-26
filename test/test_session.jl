@@ -1,10 +1,11 @@
 @testset "session API" begin
 
-    # basic 3-variable session
+    # basic 3-variable session — explicit compile! before var!
     b = mdd()
     defvar!(b, :x, 3, [0, 1])
     defvar!(b, :y, 2, [0, 1, 2])
     defvar!(b, :z, 1, [0, 1, 2])
+    compile!(b)   # fix configuration; forests created here
     x = var!(b, :x)
     y = var!(b, :y)
     z = var!(b, :z)
@@ -80,11 +81,21 @@
     @test f2 isa Edge
     @test cardinality(f2) == 8.0   # 8 non-zero minterms (x=1 only)
 
-    # defvar! after var! raises an error
+    # compile! is idempotent
+    compile!(b)
+    @test b._int_forest isa MDDForestInt
+
+    # defvar! after compile! raises an error
     b2 = mdd()
     defvar!(b2, :a, 1, [0, 1])
-    _ = var!(b2, :a)
+    compile!(b2)
     @test_throws ErrorException defvar!(b2, :b, 2, [0, 1])
+
+    # var! auto-compiles if compile! was not called
+    b2b = mdd()
+    defvar!(b2b, :a, 1, [0, 1])
+    _ = var!(b2b, :a)
+    @test b2b._int_forest isa MDDForestInt
 
     # var! on undefined name raises error
     b3 = mdd()

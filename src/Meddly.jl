@@ -12,7 +12,7 @@ export NodeHandle
 export root_node, num_vars, level_size
 export is_terminal, node_level, terminal_value, node_children
 export @match
-export MDDSession, mdd, defvar!, var!
+export MDDSession, mdd, defvar!, compile!, var!
 
 # Load the library path written by deps/build.jl.
 # Falls back to LIBMEDDLY_C_PATH env var (or bare name) when the package

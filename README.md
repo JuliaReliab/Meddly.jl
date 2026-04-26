@@ -35,6 +35,7 @@ b = mdd()                          # create a session
 defvar!(b, :x, 3, [0, 1])         # variable :x at level 3, domain {0,1}
 defvar!(b, :y, 2, [0, 1, 2])      # variable :y at level 2, domain {0,1,2}
 defvar!(b, :z, 1, [0, 1, 2])      # variable :z at level 1, domain {0,1,2}
+compile!(b)                        # fix configuration; create Domain + forests
 
 x = var!(b, :x)    # Edge: f(x,y,z) = x
 y = var!(b, :y)    # Edge: f(x,y,z) = y
@@ -401,6 +402,7 @@ run(`dot -Tpng edge.dot -o edge.png`)
 |---|---|
 | `mdd()` | Create a new `MDDSession`; auto-initialises MEDDLY |
 | `defvar!(b, name, level, domain)` | Register variable `name` at `level` with integer `domain` |
+| `compile!(b)` | Fix configuration and create Domain + forests; called automatically by `var!` |
 | `var!(b, name)` | Integer-forest `Edge` for the projection onto `name` |
 
 ### Lifecycle
