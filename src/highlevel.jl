@@ -4,6 +4,8 @@
 # Library lifecycle                                                    #
 # ------------------------------------------------------------------ #
 
+const _meddly_initialized = Ref(false)
+
 """
     initialize()
 
@@ -12,6 +14,7 @@ operation and before creating any `Domain`, `Forest`, or `Edge`.
 """
 function initialize()
     _check(_ll_initialize())
+    _meddly_initialized[] = true
 end
 
 """
@@ -23,6 +26,7 @@ this function, otherwise behaviour is undefined.
 """
 function cleanup()
     _check(_ll_cleanup())
+    _meddly_initialized[] = false
 end
 
 # ------------------------------------------------------------------ #
@@ -218,6 +222,16 @@ eagerly-created paired `bool_forest` field.
 bool_forest(f::MDDForestBool) = f
 bool_forest(f::MDDForestInt)  = f.bool_forest
 
+# Return the integer forest paired with f.  For MDDForestInt, that is f
+# itself; for MDDForestBool, it is the back-reference set by MDDForestInt.
+_int_forest_of(f::MDDForestInt) = f
+function _int_forest_of(f::MDDForestBool)
+    ref = f._int_forest.value
+    ref isa MDDForestInt && return ref
+    error("This boolean forest has no associated integer forest. " *
+          "Pass explicit Edge arms to ifthenelse instead.")
+end
+
 """
     ifthenelse(c::Edge, t::Edge, e::Edge)  →  Edge
 
@@ -244,6 +258,28 @@ function _ifthenelse(c::Edge, ::MDDForestInt, t::Edge, e::Edge)
     c * t + (one_e - c) * e
 end
 
+"""
+    ifthenelse(c::Edge, t::Integer, e::Integer) → Edge
+    ifthenelse(c::Edge, t::Edge,    e::Integer) → Edge
+    ifthenelse(c::Edge, t::Integer, e::Edge)    → Edge
+
+Overloads of `ifthenelse` that accept integer scalars as `t` or `e`.
+Constant edges are created in the integer forest paired with `c` (or with
+`t`/`e`'s own forest).
+"""
+function ifthenelse(c::Edge, t::Integer, e::Integer)
+    int_f = _int_forest_of(c.forest)
+    ifthenelse(c, Edge(int_f, t), Edge(int_f, e))
+end
+
+function ifthenelse(c::Edge, t::Edge, e::Integer)
+    ifthenelse(c, t, Edge(t.forest, e))
+end
+
+function ifthenelse(c::Edge, t::Integer, e::Edge)
+    ifthenelse(c, Edge(e.forest, t), e)
+end
+
 # ------------------------------------------------------------------ #
 # Comparison operator overloads                                        #
 # ------------------------------------------------------------------ #
@@ -258,31 +294,54 @@ Base.:(>)(a::Edge,  b::Edge) = gt(a,  b,  bool_forest(a.forest))
 Base.:(>=)(a::Edge, b::Edge) = gte(a, b,  bool_forest(a.forest))
 
 # ------------------------------------------------------------------ #
-# Queries                                                              #
+# Scalar overloads (Edge ↔ integer literal)                           #
+# ------------------------------------------------------------------ #
+
+Base.:(+)(e::Edge, n::Integer) = e + Edge(e.forest, n)
+Base.:(+)(n::Integer, e::Edge) = Edge(e.forest, n) + e
+Base.:(-)(e::Edge, n::Integer) = e - Edge(e.forest, n)
+Base.:(-)(n::Integer, e::Edge) = Edge(e.forest, n) - e
+Base.:(*)(e::Edge, n::Integer) = e * Edge(e.forest, n)
+Base.:(*)(n::Integer, e::Edge) = Edge(e.forest, n) * e
+Base.:(-)(e::Edge)             = Edge(e.forest, 0) - e
+
+Base.:(==)(e::Edge, n::Integer) = eq(e,  Edge(e.forest, n), bool_forest(e.forest))
+Base.:(==)(n::Integer, e::Edge) = eq(Edge(e.forest, n),  e, bool_forest(e.forest))
+Base.:(!=)(e::Edge, n::Integer) = neq(e, Edge(e.forest, n), bool_forest(e.forest))
+Base.:(!=)(n::Integer, e::Edge) = neq(Edge(e.forest, n), e, bool_forest(e.forest))
+Base.:(<)(e::Edge,  n::Integer) = lt(e,  Edge(e.forest, n), bool_forest(e.forest))
+Base.:(<)(n::Integer, e::Edge)  = lt(Edge(e.forest, n),  e, bool_forest(e.forest))
+Base.:(<=)(e::Edge, n::Integer) = lte(e, Edge(e.forest, n), bool_forest(e.forest))
+Base.:(<=)(n::Integer, e::Edge) = lte(Edge(e.forest, n), e, bool_forest(e.forest))
+Base.:(>)(e::Edge,  n::Integer) = gt(e,  Edge(e.forest, n), bool_forest(e.forest))
+Base.:(>)(n::Integer, e::Edge)  = gt(Edge(e.forest, n),  e, bool_forest(e.forest))
+Base.:(>=)(e::Edge, n::Integer) = gte(e, Edge(e.forest, n), bool_forest(e.forest))
+Base.:(>=)(n::Integer, e::Edge) = gte(Edge(e.forest, n), e, bool_forest(e.forest))
+
+# ------------------------------------------------------------------ #
+# Named logical operators and boolean !                               #
 # ------------------------------------------------------------------ #
 
 """
-    todot(e::Edge) → String
+    and(a::Edge, b::Edge) → Edge
 
-Return a Graphviz DOT-format string representing the decision diagram for `e`.
-
-The result can be written to a `.dot` file and rendered with the `dot` command:
-
-```julia
-write("graph.dot", todot(e))
-run(`dot -Tpdf graph.dot -o graph.pdf`)
-```
+Logical AND of two boolean edges.  Alias for `land(a, b)`.
 """
-function todot(e::Edge)::String
-    dir = mktempdir()
-    try
-        base = joinpath(dir, "g")
-        _check(_ll_edge_todot(e.ptr, base))
-        read(base * ".dot", String)
-    finally
-        rm(dir; recursive = true, force = true)
-    end
-end
+and(a::Edge, b::Edge) = land(a, b)
+
+"""
+    or(a::Edge, b::Edge) → Edge
+
+Logical OR of two boolean edges.  Alias for `lor(a, b)`.
+"""
+or(a::Edge, b::Edge) = lor(a, b)
+
+"""
+    !e  →  Edge
+
+Logical NOT (complement) of a boolean edge.  Alias for `lnot(e)`.
+"""
+Base.:(!)(e::Edge) = lnot(e)
 
 # ------------------------------------------------------------------ #
 # @match macro                                                         #
@@ -480,4 +539,149 @@ function node_children(f::AbstractForest, node::NodeHandle)
     n   = _ll_node_get_children(f.ptr, Cint(node), out)
     n < 0 && error("MEDDLY error in node_children: $(_last_error_msg())")
     Vector{NodeHandle}(out)
+end
+
+# ------------------------------------------------------------------ #
+# DOT visualisation (pure Julia, no temp files)                        #
+# ------------------------------------------------------------------ #
+
+"""
+    todot(e::Edge) → String
+
+Return a Graphviz DOT-format string representing the decision diagram for `e`.
+
+The result can be written to a `.dot` file and rendered with the `dot` command:
+
+```julia
+write("graph.dot", todot(e))
+run(`dot -Tpdf graph.dot -o graph.pdf`)
+```
+
+Implemented via BFS over the MDD node structure; no temporary files or
+C calls are used.
+"""
+function todot(e::Edge)::String
+    f    = e.forest
+    root = root_node(e)
+    lbs  = f.domain.labels     # may be empty
+    io   = IOBuffer()
+
+    # DOT node ID: 'n' + UInt32 reinterpretation avoids negative-number IDs
+    nid(h::NodeHandle) = string("n", reinterpret(UInt32, h))
+    # Variable label: use user-supplied name when available, else "x{level}"
+    lv_label(lv::Int) =
+        (!isempty(lbs) && lv <= length(lbs)) ? lbs[lv] : "x$lv"
+
+    print(io, "digraph {\n  rankdir=TB;\n")
+
+    seen  = Set{NodeHandle}()
+    queue = NodeHandle[root]
+    while !isempty(queue)
+        h = popfirst!(queue)
+        h ∈ seen && continue
+        push!(seen, h)
+        id = nid(h)
+        if is_terminal(h)
+            val = terminal_value(f, h)
+            print(io, "  ", id, " [shape=box,label=\"", val, "\"];\n")
+        else
+            lv = node_level(f, h)
+            print(io, "  ", id, " [shape=ellipse,label=\"", lv_label(lv), "\"];\n")
+            for (i, child) in enumerate(node_children(f, h))
+                print(io, "  ", id, " -> ", nid(child),
+                      " [label=\"", i - 1, "\"];\n")
+                child ∉ seen && push!(queue, child)
+            end
+        end
+    end
+
+    print(io, "}\n")
+    String(take!(io))
+end
+
+# ------------------------------------------------------------------ #
+# Reference-style session API                                          #
+# ------------------------------------------------------------------ #
+
+"""
+    mdd() → MDDSession
+
+Create a new MDD session.  MEDDLY is auto-initialised on the first call.
+Register variables with `defvar!` before building edges with `var!`.
+"""
+function mdd()
+    _meddly_initialized[] || initialize()
+    MDDSession()
+end
+
+"""
+    defvar!(b::MDDSession, name::Symbol, level::Int, domain)
+
+Register variable `name` at `level` (1-based; higher = closer to root) with
+the given integer domain values.  Must be called before any `var!` call.
+"""
+function defvar!(b::MDDSession, name::Symbol, level::Int,
+                 domain::AbstractVector{<:Integer})
+    b._int_forest !== nothing &&
+        error("defvar!: forests already created; define all variables before var!.")
+    b._var_defs[name] = (level, collect(Int, domain))
+    b._num_levels = max(b._num_levels, level)
+end
+
+function _ensure_forest!(b::MDDSession)
+    b._int_forest === nothing || return
+    isempty(b._var_defs) && error("No variables defined; call defvar! first.")
+    K = b._num_levels
+    level_sizes = zeros(Int, K)
+    for (_, (lv, dom)) in b._var_defs
+        level_sizes[lv] = length(dom)
+    end
+    any(==(0), level_sizes) &&
+        error("Levels $(findall(==(0), level_sizes)) have no variable assigned.")
+    dom           = Domain(level_sizes)
+    int_f         = MDDForestInt(dom)
+    b._domain     = dom
+    b._int_forest = int_f
+    b._bool_forest = int_f.bool_forest
+end
+
+"""
+    var!(b::MDDSession, name::Symbol) → Edge
+
+Return an integer-forest `Edge` representing the identity projection onto
+variable `name`: the MDD value at any point equals the domain value of that
+variable at that point.
+
+Built by summing single-minterm edges over all variable combinations; MEDDLY's
+full reduction collapses the result to a compact projection node automatically.
+"""
+function var!(b::MDDSession, name::Symbol)
+    _ensure_forest!(b)
+    haskey(b._var_defs, name) ||
+        error("Variable :$name not defined; call defvar! first.")
+    lv, dom = b._var_defs[name]
+    K       = b._num_levels
+    int_f   = b._int_forest
+
+    # Other variables sorted by level ascending
+    other = sort([(v_lv, v_dom)
+                  for (v_name, (v_lv, v_dom)) in b._var_defs
+                  if v_name !== name],
+                 by = x -> x[1])
+    other_ranges = [0:(length(v_dom)-1) for (_, v_dom) in other]
+    other_levels = [v_lv                for (v_lv, _)  in other]
+
+    result = Edge(int_f, 0)   # zero constant (baseline)
+    for (x_idx, x_val) in enumerate(dom)
+        x_val == 0 && continue   # contributes nothing to the sum
+        for other_assignment in Iterators.product(other_ranges...)
+            vars_vec     = zeros(Int, K)
+            vars_vec[lv] = x_idx - 1   # 0-based MEDDLY index
+            for (i, v_lv) in enumerate(other_levels)
+                vars_vec[v_lv] = other_assignment[i]
+            end
+            result = result + Edge(int_f, vars_vec, x_val)
+        end
+    end
+    result
 end

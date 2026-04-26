@@ -37,6 +37,7 @@ using Meddly
     include("test_misc.jl")
     include("test_traverse.jl")
     include("test_match.jl")
+    include("test_session.jl")
 
     cleanup()
 

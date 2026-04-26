@@ -9,12 +9,17 @@
 
 mutable struct Domain
     ptr::Ptr{Cvoid}
+    labels::Vector{String}  # labels[k] = name for variable at level k (1-indexed)
+                             # empty vector → todot falls back to "x{k}"
 
-    function Domain(level_sizes::Vector{Int})
+    function Domain(level_sizes::Vector{Int};
+                    labels::Vector{String} = String[])
         isempty(level_sizes) && error("level_sizes must not be empty")
+        !isempty(labels) && length(labels) != length(level_sizes) &&
+            error("labels length ($(length(labels))) must equal level count ($(length(level_sizes)))")
         sizes = Cint.(level_sizes)
         ptr = _check_ptr(_ll_domain_create(sizes))
-        d = new(ptr)
+        d = new(ptr, labels)
         finalizer(d) do x
             if x.ptr != C_NULL
                 _ll_domain_destroy(x.ptr)
@@ -78,10 +83,11 @@ Boolean multi-terminal MDD forest over `domain`.
 mutable struct MDDForestBool <: AbstractForest
     ptr::Ptr{Cvoid}
     domain::Domain
+    _int_forest::WeakRef   # back-reference to the paired MDDForestInt (if any)
 
     function MDDForestBool(domain::Domain; kind::Symbol = :mdd)
         ptr = _check_ptr(_ll_forest_create(domain.ptr, _kind_int(kind), _RANGE_BOOLEAN))
-        f = new(ptr, domain)
+        f = new(ptr, domain, WeakRef(nothing))
         finalizer(f) do x
             if x.ptr != C_NULL
                 _ll_forest_destroy(x.ptr)
@@ -114,6 +120,7 @@ mutable struct MDDForestInt <: AbstractForest
         ptr = _check_ptr(_ll_forest_create(domain.ptr, k, _RANGE_INTEGER))
         bf  = MDDForestBool(domain; kind = kind)
         f   = new(ptr, domain, bf)
+        bf._int_forest = WeakRef(f)   # back-reference for scalar ifthenelse
         finalizer(f) do x
             if x.ptr != C_NULL
                 _ll_forest_destroy(x.ptr)
@@ -184,3 +191,23 @@ end
 
 Base.show(io::IO, e::Edge) =
     print(io, "Edge(", e.ptr == C_NULL ? "destroyed" : string(e.ptr), ")")
+
+# ------------------------------------------------------------------ #
+# MDDSession — reference-style session object                          #
+# ------------------------------------------------------------------ #
+
+"""
+    MDDSession
+
+Session object for the reference-style MDD API.  Create with `mdd()`,
+register variables with `defvar!`, then build projection edges with `var!`.
+"""
+mutable struct MDDSession
+    _var_defs   ::Dict{Symbol, Tuple{Int, Vector{Int}}}  # name => (level, domain)
+    _num_levels ::Int
+    _domain     ::Union{Domain, Nothing}
+    _int_forest ::Union{MDDForestInt, Nothing}
+    _bool_forest::Union{MDDForestBool, Nothing}
+
+    MDDSession() = new(Dict{Symbol,Tuple{Int,Vector{Int}}}(), 0, nothing, nothing, nothing)
+end
