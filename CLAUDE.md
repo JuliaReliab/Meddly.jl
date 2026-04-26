@@ -41,7 +41,9 @@ src/highlevel.jl    ← public API: initialize/cleanup, set ops (|, &, setdiff),
                       integer arithmetic (+, -, *, max, min),
                       comparisons (eq, neq, lt, lte, gt, gte),
                       logical ops (land, lor, lnot),
-                      copy_edge, ifthenelse, todot, cardinality, is_empty
+                      copy_edge, ifthenelse, todot, cardinality, is_empty,
+                      traversal (root_node, num_vars, level_size, is_terminal,
+                                 node_level, terminal_value, node_children)
 src/types.jl        ← mutable structs Domain / Forest / Edge
                       each holds a Ptr{Cvoid} + a reference to its parent
                       (Edge→Forest→Domain) to prevent premature GC;
@@ -68,6 +70,23 @@ The `range` field is used at runtime by `ifthenelse` to auto-convert boolean con
 - `Edge(forest, values::Vector{Int})` — single boolean minterm
 - `Edge(forest, value::Integer)` — constant integer edge (all minterms → value)
 - `Edge(forest, vars::Vector{Int}, value::Integer)` — single-minterm integer edge (0 elsewhere)
+
+### Traversal API
+
+**`NodeHandle`** = `Int32` type alias. Terminal nodes have handle ≤ 0:
+- MT-boolean: false = `0`, true = `-1`.
+- MT-integer: zero = `0`, value `v ≠ 0` = `Int32(v) | typemin(Int32)` (sign bit set).
+  - Decode with `forest::getIntegerFromHandle(p)`: `(h << 1) >> 1` strips the sign bit.
+- Two handles are equal iff they encode the same value (MDDs share terminals globally).
+
+`node_children(f, node)` uses `MEDDLY::unpacked_node::newFromNode(f, node, MEDDLY::FULL_ONLY)`
+to obtain a dense (full) child array, normalising both FULL and SPARSE stored nodes.
+Always use `MEDDLY::FULL_ONLY` (namespace-qualified) — bare `FULL_ONLY` is not in scope.
+Pattern: `newFromNode` → iterate `un->down(i)` → `unpacked_node::Recycle(un)`.
+
+In a fully-reduced MDD, a child's level may be lower than `parent_level - 1`.
+Skipped levels act as redundant nodes; `evaluate`-style algorithms must use
+`node_level(f, child)` rather than assuming `parent_level - 1`.
 
 ### `ifthenelse` design
 `ifthenelse(c, t, e)` is implemented as `c_int * t + (1 - c_int) * e` where:
@@ -98,6 +117,16 @@ The `range` field is used at runtime by `ifthenelse` to auto-convert boolean con
 - Cross-forest copy: `MEDDLY::apply(MEDDLY::COPY, src, dst)` — boolean→integer maps false→0, true→1
 - Complement: `MEDDLY::apply(MEDDLY::COMPLEMENT, a, c)` — boolean forests only
 - Cardinality: `MEDDLY::apply(MEDDLY::CARDINALITY, edge, double&)`
+- **Traversal**:
+  - `dd_edge::getNode()` → root `node_handle` (int)
+  - `forest::isTerminalNode(p)` → true when `p < 1` (i.e. `p <= 0`)
+  - `forest::getNodeLevel(p)` → 0 for terminals, 1..K for internal
+  - `forest::getNumVariables()` → K (unsigned)
+  - `forest::getLevelSize(k)` → domain size at level k
+  - `forest::getBooleanFromHandle(p)` / `getIntegerFromHandle(p)` → terminal value
+  - `unpacked_node::newFromNode(f, node, MEDDLY::FULL_ONLY)` → dense child array
+  - `un->getSize()` → number of children; `un->down(i)` → i-th child handle
+  - `unpacked_node::Recycle(un)` → release (must always be called)
 
 ### `deps/build.jl` quirks
 - Builds only `src/` of MEDDLY (`make -C src`) because `examples/` unconditionally `#include <gmp.h>` even when `--without-gmp` is passed to configure.
@@ -144,3 +173,38 @@ The `range` field is used at runtime by `ifthenelse` to auto-convert boolean con
 - The C++ shim (`c/meddly_c.cpp`) still contains the EV+MDD helper code (`meddly_forest_create_ev`, `meddly_edge_create_from_minterm_int` with PLUS_INFINITY branch, etc.) — these are unused from Julia but harmless.
 - The fixes for `meddly_edge_create` (no `createConstant` call) and `meddly_edge_is_empty` (use `getNode()==0`) are **intentional** and fix bugs for MT-integer forests too. Do not revert them.
 - `c/libmeddly_c.dylib` in the repo root is a stale artifact from early development; the authoritative build output is `deps/usr/lib/libmeddly_c.dylib`.
+
+### 2026-04-26 (session 2)
+**Done:**
+- Rewrote `README.md` with complete English documentation: boolean MDD, integer forest,
+  arithmetic, comparisons, logical ops, `ifthenelse`, `todot`, full API table,
+  corrected test command (`julia --project=. test/runtests.jl`), updated known limitations.
+- Split `test/runtests.jl` into 6 feature files (`test_lifecycle`, `test_boolean`,
+  `test_integer`, `test_comparison`, `test_ifthenelse`, `test_misc`); 83 tests total.
+- Initialized git repository and created initial commit (22 files).
+- Added MDD traversal API (C shim + Julia bindings + tests):
+  - New C functions: `meddly_edge_get_node`, `meddly_forest_num_vars`,
+    `meddly_forest_level_size`, `meddly_node_is_terminal`, `meddly_node_level`,
+    `meddly_node_bool_value`, `meddly_node_int_value`, `meddly_node_get_children`.
+  - New Julia exports: `NodeHandle` (= `Int32`), `root_node`, `num_vars`, `level_size`,
+    `is_terminal`, `node_level`, `terminal_value`, `node_children`.
+  - `test/test_traverse.jl`: 47 tests; total test count now 130.
+- Updated README.md with traversal section (4 worked examples: evaluate, cardinality,
+  collect minterms, sum of values) and extended API table.
+- Three git commits on branch `main`.
+
+**Pending:**
+- Implement `meddly_edge_ifthenelse` in C++ via direct DD traversal for EV+MDD support
+  (see TODO.md §2).
+- Minterm iteration API (iterate without building the full explicit list).
+- More thorough MxD (relation forest) testing.
+
+**Notes for next session:**
+- `terminal_value(f, node)` dispatches on `f.range` (`:boolean` → `Bool`, `:integer` → `Int`).
+  For MT-integer, terminal encoding is `Int32(v) | typemin(Int32)` for v≠0, decoded by
+  `forest::getIntegerFromHandle` via `(h << 1) >> 1`.
+- In fully-reduced MDDs, `node_children(f, n)` may return children at levels lower than
+  `node_level(f, n) - 1`. Algorithms must use `node_level(f, child)` — never assume
+  consecutive levels.
+- `meddly_node_get_children` uses `MEDDLY::FULL_ONLY` (namespace-qualified; bare
+  `FULL_ONLY` is not in scope in `meddly_c.cpp`).
