@@ -11,11 +11,21 @@ const _meddly_initialized = Ref(false)
 
 Initialize the MEDDLY library.  Must be called before any other Meddly
 operation and before creating any `Domain`, `Forest`, or `Edge`.
+Calling `initialize()` when already initialized is a no-op.
 """
 function initialize()
+    _meddly_initialized[] && return
     _check(_ll_initialize())
     _meddly_initialized[] = true
 end
+
+"""
+    is_initialized() → Bool
+
+Return `true` if `initialize()` has been called and `cleanup()` has not been
+called since.
+"""
+is_initialized() = _meddly_initialized[]
 
 """
     cleanup()
@@ -696,4 +706,63 @@ function var!(b::MDDSession, name::Symbol)
         end
     end
     result
+end
+
+# ------------------------------------------------------------------ #
+# MxD relation edges                                                   #
+# ------------------------------------------------------------------ #
+
+"""
+    mxd_singleton(forest::MDDForestBoolMxD,
+                  unprimed::Vector{Int}, primed::Vector{Int}) → Edge
+
+Create a boolean MxD edge encoding the single transition pair
+`(unprimed, primed)`.
+
+- `unprimed[i]` : value for variable i (1-indexed); use `-1` for DONT_CARE.
+- `primed[i]`   : value for variable i (1-indexed); use `-2` for DONT_CHANGE.
+"""
+function mxd_singleton(forest::MDDForestBoolMxD,
+                        unprimed::Vector{Int}, primed::Vector{Int})
+    length(unprimed) == length(primed) ||
+        error("unprimed and primed must have the same length")
+    up = Cint.(unprimed)
+    pr = Cint.(primed)
+    ptr = _check_ptr(_ll_edge_create_from_minterm_pair(forest.ptr, up, pr))
+    _make_edge(ptr, forest)
+end
+
+# ------------------------------------------------------------------ #
+# Image operations                                                     #
+# ------------------------------------------------------------------ #
+
+"""
+    post_image(set::Edge, rel::Edge) → Edge
+
+Compute the post-image of `set` under relation `rel`:
+`{ m' : ∃ m ∈ set, (m, m') ∈ rel }`.
+
+`set` must be in a boolean MDD (set) forest and `rel` in the corresponding
+boolean MxD (relation) forest over the same domain.
+The result is a new edge in the same forest as `set`.
+"""
+function post_image(set::Edge, rel::Edge)
+    ret, ptr = _ll_edge_post_image(set.ptr, rel.ptr)
+    _check(ret)
+    _make_edge(ptr, set.forest)
+end
+
+"""
+    reachable_bfs(initial::Edge, rel::Edge) → Edge
+
+Compute the set of states reachable from `initial` via `rel` using BFS
+(iterative fixpoint of `post_image`).
+
+`initial` must be a boolean MDD edge and `rel` the corresponding MxD edge.
+Returns a new MDD edge containing all reachable states.
+"""
+function reachable_bfs(initial::Edge, rel::Edge)
+    ret, ptr = _ll_edge_reachable_bfs(initial.ptr, rel.ptr)
+    _check(ret)
+    _make_edge(ptr, initial.forest)
 end

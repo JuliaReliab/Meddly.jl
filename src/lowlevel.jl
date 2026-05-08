@@ -194,3 +194,31 @@ function _ll_node_get_children(f::Ptr{Cvoid}, node::Cint, out::Vector{Cint})
     ccall((:meddly_node_get_children, libmeddly_c), Cint,
           (Ptr{Cvoid}, Cint, Ptr{Cint}, Cint), f, node, out, length(out))
 end
+
+# ------------------------------------------------------------------ #
+# MxD minterm pair + image operations                                  #
+# ------------------------------------------------------------------ #
+
+function _ll_edge_create_from_minterm_pair(forest::Ptr{Cvoid},
+                                           unprimed::Vector{Cint},
+                                           primed::Vector{Cint})
+    ccall((:meddly_edge_create_from_minterm_pair, libmeddly_c), Ptr{Cvoid},
+          (Ptr{Cvoid}, Ptr{Cint}, Ptr{Cint}, Cint),
+          forest, unprimed, primed, length(unprimed))
+end
+
+function _ll_edge_post_image(set_edge::Ptr{Cvoid}, rel_edge::Ptr{Cvoid})
+    result = Ref{Ptr{Cvoid}}(C_NULL)
+    ret = ccall((:meddly_edge_post_image, libmeddly_c), Cint,
+                (Ptr{Cvoid}, Ptr{Cvoid}, Ref{Ptr{Cvoid}}),
+                set_edge, rel_edge, result)
+    ret, result[]
+end
+
+function _ll_edge_reachable_bfs(initial_edge::Ptr{Cvoid}, rel_edge::Ptr{Cvoid})
+    result = Ref{Ptr{Cvoid}}(C_NULL)
+    ret = ccall((:meddly_edge_reachable_bfs, libmeddly_c), Cint,
+                (Ptr{Cvoid}, Ptr{Cvoid}, Ref{Ptr{Cvoid}}),
+                initial_edge, rel_edge, result)
+    ret, result[]
+end

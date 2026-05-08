@@ -102,6 +102,32 @@ Base.show(io::IO, f::MDDForestBool) =
     print(io, "MDDForestBool(", f.ptr == C_NULL ? "destroyed" : string(f.ptr), ")")
 
 """
+    MDDForestBoolMxD(domain)
+
+Boolean multi-terminal MxD (relation) forest over `domain`.
+Used to represent transition relations for image operations.
+"""
+mutable struct MDDForestBoolMxD <: AbstractForest
+    ptr::Ptr{Cvoid}
+    domain::Domain
+
+    function MDDForestBoolMxD(domain::Domain)
+        ptr = _check_ptr(_ll_forest_create(domain.ptr, _FOREST_MXD, _RANGE_BOOLEAN))
+        f = new(ptr, domain)
+        finalizer(f) do x
+            if x.ptr != C_NULL
+                _ll_forest_destroy(x.ptr)
+                x.ptr = C_NULL
+            end
+        end
+        f
+    end
+end
+
+Base.show(io::IO, f::MDDForestBoolMxD) =
+    print(io, "MDDForestBoolMxD(", f.ptr == C_NULL ? "destroyed" : string(f.ptr), ")")
+
+"""
     MDDForestInt(domain; kind = :mdd)
 
 Integer multi-terminal MDD forest over `domain`.

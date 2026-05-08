@@ -138,6 +138,40 @@ int meddly_edge_ifthenelse(void* cond, void* then_e, void* else_e, void** result
 int meddly_edge_complement(void* a, void** result);
 
 /* ------------------------------------------------------------------ */
+/* MxD (relation) edge construction                                     */
+/* ------------------------------------------------------------------ */
+
+/* Create a single MxD minterm pair.
+ * forest must be a RELATION (MxD) boolean forest.
+ * unprimed[i] : value for variable i+1 unprimed;  MEDDLY::DONT_CARE  = -1
+ * primed[i]   : value for variable i+1 primed;    MEDDLY::DONT_CHANGE = -2
+ * count       : number of variables (= domain depth).
+ * Returns a new edge (caller must destroy), or NULL on error. */
+void* meddly_edge_create_from_minterm_pair(void* forest,
+                                           const int* unprimed,
+                                           const int* primed,
+                                           int count);
+
+/* ------------------------------------------------------------------ */
+/* Image operations (set × relation → set)                              */
+/* ------------------------------------------------------------------ */
+
+/* POST_IMAGE: compute {m' : ∃ m ∈ set_edge, (m,m') ∈ rel_edge }.
+ * set_edge : boolean MDD edge (SET forest)
+ * rel_edge : boolean MxD edge (RELATION forest, same domain)
+ * result   : new MDD edge in the same forest as set_edge (caller must destroy)
+ * Returns MEDDLY_C_OK on success. */
+int meddly_edge_post_image(void* set_edge, void* rel_edge, void** result);
+
+/* Compute the set of states reachable from initial_edge via rel_edge
+ * using BFS (fixpoint of POST_IMAGE).
+ * initial_edge : boolean MDD edge (SET forest, initial state set)
+ * rel_edge     : boolean MxD edge (RELATION forest, same domain)
+ * result       : new MDD edge (caller must destroy)
+ * Returns MEDDLY_C_OK on success. */
+int meddly_edge_reachable_bfs(void* initial_edge, void* rel_edge, void** result);
+
+/* ------------------------------------------------------------------ */
 /* DOT output                                                           */
 /* ------------------------------------------------------------------ */
 

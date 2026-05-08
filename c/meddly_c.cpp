@@ -399,6 +399,86 @@ int meddly_edge_difference(void* a, void* b, void** result) {
 }
 
 /* ------------------------------------------------------------------ */
+/* MxD minterm pair creation                                            */
+/* ------------------------------------------------------------------ */
+
+void* meddly_edge_create_from_minterm_pair(void* forest,
+                                           const int* unprimed,
+                                           const int* primed,
+                                           int count) {
+    if (!forest || !unprimed || !primed || count <= 0) {
+        set_error("meddly_edge_create_from_minterm_pair: invalid arguments");
+        return nullptr;
+    }
+    try {
+        MEDDLY::forest* f = static_cast<MEDDLY::forest*>(forest);
+        MEDDLY::dd_edge* e = new MEDDLY::dd_edge(f);
+        MEDDLY::minterm m(f);
+        m.setValue(true);
+        for (int i = 0; i < count; i++) {
+            // setVars(var_1indexed, from, to): from = unprimed, to = primed
+            // DONT_CARE = -1, DONT_CHANGE = -2
+            m.setVars(i + 1, unprimed[i], primed[i]);
+        }
+        m.buildFunction(false, *e);
+        return static_cast<void*>(e);
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& ex) { set_error(ex.what()); }
+      catch (...) { set_error("unknown exception in meddly_edge_create_from_minterm_pair"); }
+    return nullptr;
+}
+
+/* ------------------------------------------------------------------ */
+/* Image operations (set × relation → set)                              */
+/* ------------------------------------------------------------------ */
+
+int meddly_edge_post_image(void* set_edge, void* rel_edge, void** result) {
+    if (!set_edge || !rel_edge || !result) {
+        set_error("meddly_edge_post_image: null argument"); return MEDDLY_C_ERR_NULL;
+    }
+    try {
+        MEDDLY::dd_edge* es = static_cast<MEDDLY::dd_edge*>(set_edge);
+        MEDDLY::dd_edge* er = static_cast<MEDDLY::dd_edge*>(rel_edge);
+        MEDDLY::dd_edge* ec = new MEDDLY::dd_edge(edge_forest(set_edge));
+        MEDDLY::apply(MEDDLY::POST_IMAGE, *es, *er, *ec);
+        *result = static_cast<void*>(ec);
+        return MEDDLY_C_OK;
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_edge_post_image"); }
+    return MEDDLY_C_ERR_EXCEPT;
+}
+
+int meddly_edge_reachable_bfs(void* initial_edge, void* rel_edge, void** result) {
+    if (!initial_edge || !rel_edge || !result) {
+        set_error("meddly_edge_reachable_bfs: null argument"); return MEDDLY_C_ERR_NULL;
+    }
+    try {
+        MEDDLY::forest* set_f = edge_forest(initial_edge);
+        MEDDLY::dd_edge* init = static_cast<MEDDLY::dd_edge*>(initial_edge);
+        MEDDLY::dd_edge* rel  = static_cast<MEDDLY::dd_edge*>(rel_edge);
+
+        MEDDLY::dd_edge* res      = new MEDDLY::dd_edge(*init);  // start from initial
+        MEDDLY::dd_edge  frontier = *init;
+        MEDDLY::dd_edge  img(set_f);
+        MEDDLY::dd_edge  newf(set_f);
+
+        for (;;) {
+            MEDDLY::apply(MEDDLY::POST_IMAGE, frontier, *rel, img);
+            MEDDLY::apply(MEDDLY::DIFFERENCE, img, *res, newf);
+            if (newf.getNode() == 0) break;           // fixpoint reached
+            MEDDLY::apply(MEDDLY::UNION, *res, newf, *res);
+            frontier = newf;
+        }
+        *result = static_cast<void*>(res);
+        return MEDDLY_C_OK;
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_edge_reachable_bfs"); }
+    return MEDDLY_C_ERR_EXCEPT;
+}
+
+/* ------------------------------------------------------------------ */
 /* Logical complement                                                   */
 /* ------------------------------------------------------------------ */
 
