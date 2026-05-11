@@ -68,6 +68,7 @@ deps/usr/lib/libmeddly.a  ← MEDDLY 0.18.x built by deps/build.jl
 **Type hierarchy (no `Forest` type — removed as breaking change):**
 - `abstract type AbstractForest` — dispatch supertype; all forest pointers are `AbstractForest`
 - `mutable struct MDDForestBool <: AbstractForest` — boolean multi-terminal MDD; fields `ptr`, `domain`
+- `mutable struct MDDForestBoolMxD <: AbstractForest` — boolean MxD relation forest; created by `MDDForestBoolMxD(dom)`
 - `mutable struct MDDForestInt <: AbstractForest` — integer multi-terminal MDD; fields `ptr`, `domain`, `bool_forest::MDDForestBool` (eagerly created)
 - `bool_forest(f::MDDForestBool) = f` / `bool_forest(f::MDDForestInt) = f.bool_forest` — retrieves associated boolean forest
 
@@ -143,6 +144,48 @@ Skipped levels act as redundant nodes; `evaluate`-style algorithms must use
 - On macOS, sets `LIBTOOLIZE=glibtoolize` for `autoreconf`.
 - `libmeddly_c` is a shared library that **statically links** `libmeddly.a`, so only `libmeddly_c.dylib/.so` needs to be present at runtime.
 - `deps/meddly-src/` and `deps/usr/` are git-ignored generated artifacts.
+
+### MxD relation API (v0.4.0)
+
+`MDDForestBoolMxD` holds a MEDDLY RELATION boolean forest. Three operations:
+
+- `mxd_singleton(forest, unprimed, primed)` — builds a single-pair MxD edge.
+  Both arrays are length K (number of variables, 1-indexed at the Julia level).
+  `-1` entries in `unprimed` = DONT_CARE (match any pre-state value).
+  `-1` entries in `primed` = DONT_CHANGE (keep the variable unchanged).
+  Uses `meddly_edge_create_from_minterm_pair` in the C shim, which calls
+  `m.setVars(i+1, unp_val, pri_val)` for each variable level.
+
+- `post_image(set::Edge, rel::Edge)` — forward image; wraps `meddly_edge_post_image`
+  which calls `MEDDLY::apply(POST_IMAGE, set, rel, result)`.
+
+- `reachable_bfs(initial::Edge, rel::Edge)` — BFS fixed-point loop in C shim:
+  `frontier = POST_IMAGE(current, rel)`, `new = DIFFERENCE(frontier, current)`,
+  loop until `new` is empty. Wraps `meddly_edge_reachable_bfs`.
+
+**Per-variable intersection of MxD edges is NOT valid**: if two edges each use
+`DONT_CHANGE` for different variables, MEDDLY's INTERSECTION treats them as
+compatible constraints and intersects — yielding wrong results. Always union
+singleton edges per transition (one singleton per combination of changed-variable
+values) rather than intersecting per-variable edges.
+
+### `var!` construction (v0.4.0 fix)
+
+`var!(b, :x)` now uses DONT_CARE (`-1`) for all variables except the target:
+
+```julia
+vars_vec = fill(-1, K)       # DONT_CARE everywhere
+for (x_idx, x_val) in enumerate(dom)
+    x_val == 0 && continue
+    vars_vec[lv] = x_idx - 1  # 0-based MEDDLY index for target variable
+    result = result + Edge(int_f, vars_vec, x_val)
+    vars_vec[lv] = -1
+end
+```
+
+This is O(domain_size) instead of O(∏ domain_sizes). MEDDLY's full-reduction
+collapses the result to a compact single-level node. DONT_CARE = -1 is confirmed
+in `meddly/minterms.h`: `const int DONT_CARE = -1`.
 
 ### Known limitations (see TODO.md for details)
 - **EV+MDD (EVPLUS)** forests: edge/arithmetic creation works, but `ifthenelse` is broken.
@@ -281,3 +324,28 @@ Skipped levels act as redundant nodes; `evaluate`-style algorithms must use
   If upgrading MEDDLY, check whether this macro is still defined.
 - `c/libmeddly_c.dylib` in the repo root is a stale artifact; authoritative output is
   `deps/usr/lib/libmeddly_c.dylib`.
+
+### 2026-05-11
+
+**Done:**
+- Fixed `var!` exponential construction cost: replaced `Iterators.product` over all other
+  variable combinations with DONT_CARE (`-1`) approach — O(domain_size) iterations instead
+  of O(∏ domain_sizes). Confirmed `DONT_CARE = -1` from `meddly/minterms.h`.
+- Added MxD relation API (carried over from PS4GSPN.jl `MeddlySetEngine` work):
+  - `MDDForestBoolMxD` type in `src/types.jl` (boolean RELATION forest with finalizer)
+  - C shim (`c/meddly_c.cpp`): `meddly_edge_create_from_minterm_pair` (builds MxD singleton),
+    `meddly_edge_post_image` (POST_IMAGE apply), `meddly_edge_reachable_bfs` (BFS fixed-point)
+  - `src/lowlevel.jl`: three ccall wrappers
+  - `src/highlevel.jl`: `mxd_singleton`, `post_image`, `reachable_bfs`; `initialize()` made
+    idempotent; `is_initialized()` added
+  - `src/Meddly.jl`: exports `MDDForestBoolMxD`, `mxd_singleton`, `post_image`,
+    `reachable_bfs`, `is_initialized`
+- Bumped version to 0.4.0 in `Project.toml`
+- Updated `README.md`, `CHANGELOG.md`, `TODO.md`, `CLAUDE.md` with v0.4.0 additions
+
+**Notes for next session:**
+- `mxd_singleton` uses `setVars(i+1, unp, pri)` (1-indexed in MEDDLY); Julia arrays are
+  length K (number of variables) with entry `k` corresponding to MEDDLY level `k`
+- MxD and MDD edges must share the same `Domain` — checked by `MEDDLY::apply` at call time
+- DONT_CARE = -1 works for both primed and unprimed positions in `setVars` (MEDDLY uses
+  the same sentinel for both); confirmed in MEDDLY 0.18.x `minterms.h`

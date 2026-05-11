@@ -376,6 +376,59 @@ end
 
 ---
 
+## MxD relation forests — symbolic reachability
+
+`MDDForestBoolMxD` is a boolean relation forest (MDD over pairs of states).
+Use it to encode transition relations and compute reachable state sets.
+
+```julia
+using Meddly
+
+initialize()
+
+# Domain: 3 binary variables
+dom = Domain([2, 2, 2])
+
+# Boolean MDD (set of states)
+set_f = MDDForestBool(dom)
+# Boolean MxD (relation between states)
+rel_f = MDDForestBoolMxD(dom)
+
+# Single-state initial set: {(0,0,0)}
+initial = Edge(set_f, [0, 0, 0])
+
+# A transition that flips variable 1: (0,*,*) → (1,*,*)
+# DONT_CARE = -1 in unprimed/primed arrays
+rel = mxd_singleton(rel_f, [0, -1, -1], [1, -1, -1])
+
+# One step forward
+next = post_image(initial, rel)
+cardinality(next)   # → 1.0
+
+# Full BFS reachability
+rs = reachable_bfs(initial, rel)
+cardinality(rs)   # → number of reachable states
+
+cleanup()
+```
+
+### MxD API reference
+
+| Function | Description |
+|---|---|
+| `MDDForestBoolMxD(dom)` | Boolean relation forest for domain `dom` |
+| `mxd_singleton(forest, unprimed, primed)` | Single-pair MxD edge; `-1` entries = DONT_CARE |
+| `post_image(set, rel)` | Image of `set` under relation `rel` |
+| `reachable_bfs(initial, rel)` | BFS fixed-point: full reachable set from `initial` |
+
+**Note:** when building a relation that changes only a subset of variables, set `-1`
+(DONT_CARE) in the unprimed array and `-1` (DONT_CHANGE) in the primed array for
+all unchanged variables.  Per-variable MxD edges cannot be intersected directly
+(DONT_CHANGE constraints conflict); instead, enumerate the combinations of changed
+variables and union the resulting singleton edges.
+
+---
+
 ## Visualization
 
 `todot` serializes any edge as a Graphviz DOT string (implemented as a pure
@@ -409,7 +462,8 @@ run(`dot -Tpng edge.dot -o edge.png`)
 
 | Function | Description |
 |---|---|
-| `initialize()` | Initialize the MEDDLY library (once per process) |
+| `initialize()` | Initialize the MEDDLY library (idempotent; once per process) |
+| `is_initialized()` | Returns `true` if `initialize()` has been called and `cleanup()` has not |
 | `cleanup()` | Release MEDDLY global state |
 
 ### Types and constructors
@@ -417,13 +471,22 @@ run(`dot -Tpng edge.dot -o edge.png`)
 | Function / Type | Description |
 |---|---|
 | `Domain(sizes; labels)` | Domain with `sizes[i]` values for variable at level `i`; optional `labels` used by `todot` |
-| `MDDForestBool(dom; kind)` | Boolean MDD forest; `kind ∈ {:mdd, :mxd}` (default `:mdd`) |
-| `MDDForestInt(dom; kind)` | Integer MDD forest; eagerly creates a paired `bool_forest` |
+| `MDDForestBool(dom)` | Boolean MDD forest (set of states) |
+| `MDDForestBoolMxD(dom)` | Boolean MxD forest (relation between states) |
+| `MDDForestInt(dom)` | Integer MDD forest; eagerly creates a paired `bool_forest` |
 | `bool_forest(f)` | Return the `MDDForestBool` associated with `f` |
 | `Edge(f)` | Empty boolean edge / zero integer function |
 | `Edge(f, values)` | Single-minterm boolean edge |
 | `Edge(f, const_val)` | Constant integer edge (all minterms → `const_val`) |
 | `Edge(f, values, val)` | Single-minterm integer edge |
+
+### MxD relation
+
+| Function | Description |
+|---|---|
+| `mxd_singleton(forest, unprimed, primed)` | Single-pair MxD edge; `-1` = DONT_CARE / DONT_CHANGE |
+| `post_image(set, rel)` | Forward image: states reachable in one step |
+| `reachable_bfs(initial, rel)` | BFS fixed-point reachable set from `initial` |
 
 ### Set operations (boolean forests)
 
@@ -519,9 +582,13 @@ deps/usr/lib/libmeddly.a   ← MEDDLY 0.18.x built by Pkg.build
   eagerly created `bool_forest::MDDForestBool`
 
 **`var!` projection construction:** MEDDLY has no "project onto variable k"
-primitive, so `var!(b, :x)` sums single-minterm `Edge` objects over all
-combinations of other variables.  MEDDLY's full-reduction policy collapses the
-result to a compact single-level node automatically.
+primitive, so `var!(b, :x)` sums single-minterm `Edge` objects over all values
+in the target variable's domain (O(domain_size) edges total).  All other
+variables are set to DONT_CARE (`-1`), which MEDDLY interprets as "any value".
+MEDDLY's full-reduction policy collapses the result to a compact single-level
+node automatically.  Earlier versions iterated all combinations of other
+variables — O(∏ domain_sizes) — which was exponential and impractical for
+large models.
 
 **Memory ownership:** each Julia struct holds a `Ptr{Cvoid}` to a C++-heap
 object; its finalizer calls the matching `meddly_*_destroy` function.  Each
@@ -549,5 +616,4 @@ form above.)
   See `TODO.md` for details and planned approaches.
 - No built-in minterm iteration yet; use the traversal API to walk nodes
   and collect minterms manually (see `collect_minterms` example above).
-- Relation forests (`kind = :mxd`) are wired up but minimally tested.
 - `libmeddly_c` is built locally; there is no JLL artifact yet.

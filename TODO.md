@@ -104,7 +104,7 @@ t・e をあらかじめ OMEGA_NORMAL(0) 背景（dense）で構築した上で
   （README の `collect_minterms` 例を参照）。
 - **JLL アーティファクト**: `libmeddly_c` のビルド済みバイナリを JLL パッケージとして
   配布することで `Pkg.build` 不要にできる。
-- **MxD（関係フォレスト）テスト**: `kind = :mxd` は配線済みだが最小限しかテストされていない。
-- **`var!` 構築の高速化**: 現状は他変数の全組み合わせを反復して単一ミンターム Edge を
+- ~~**MxD（関係フォレスト）テスト**: `kind = :mxd` は配線済みだが最小限しかテストされていない。~~ **解決済み (v0.4.0)**: `MDDForestBoolMxD`, `mxd_singleton`, `post_image`, `reachable_bfs` を実装・テスト済み。
+- ~~**`var!` 構築の高速化**: 現状は他変数の全組み合わせを反復して単一ミンターム Edge を
   足し合わせるため，変数数・定義域サイズが大きいと遅い。MEDDLY の内部 API で
-  直接ノードを構築できれば O(domain_size) に削減できる。
+  直接ノードを構築できれば O(domain_size) に削減できる。~~ **解決済み (v0.4.0)**: DONT_CARE (`-1`) を使って O(domain_size) に削減済み。MEDDLY 内部 API 不要。

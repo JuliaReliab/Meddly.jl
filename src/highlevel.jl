@@ -685,25 +685,13 @@ function var!(b::MDDSession, name::Symbol)
     K       = b._num_levels
     int_f   = b._int_forest
 
-    # Other variables sorted by level ascending
-    other = sort([(v_lv, v_dom)
-                  for (v_name, (v_lv, v_dom)) in b._var_defs
-                  if v_name !== name],
-                 by = x -> x[1])
-    other_ranges = [0:(length(v_dom)-1) for (_, v_dom) in other]
-    other_levels = [v_lv                for (v_lv, _)  in other]
-
-    result = Edge(int_f, 0)   # zero constant (baseline)
+    result   = Edge(int_f, 0)
+    vars_vec = fill(-1, K)   # -1 = DONT_CARE for all other variables
     for (x_idx, x_val) in enumerate(dom)
-        x_val == 0 && continue   # contributes nothing to the sum
-        for other_assignment in Iterators.product(other_ranges...)
-            vars_vec     = zeros(Int, K)
-            vars_vec[lv] = x_idx - 1   # 0-based MEDDLY index
-            for (i, v_lv) in enumerate(other_levels)
-                vars_vec[v_lv] = other_assignment[i]
-            end
-            result = result + Edge(int_f, vars_vec, x_val)
-        end
+        x_val == 0 && continue
+        vars_vec[lv] = x_idx - 1   # 0-based MEDDLY index
+        result = result + Edge(int_f, vars_vec, x_val)
+        vars_vec[lv] = -1
     end
     result
 end

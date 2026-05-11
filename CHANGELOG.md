@@ -5,6 +5,25 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.4.0] — 2026-05-11
+
+### Added
+
+- **MxD relation API** — boolean relation forest for symbolic reachability:
+  - `MDDForestBoolMxD` type (`kind = :mxd` boolean forest with GC finalizer)
+  - `mxd_singleton(forest, unprimed, primed)` — construct a single-pair MxD edge from two minterm arrays (unprimed = pre-state, primed = post-state); DONT_CARE (`-1`) entries accepted in either array
+  - `post_image(set::Edge, rel::Edge)` — compute the image of a set under a relation (`POST_IMAGE apply` in MEDDLY)
+  - `reachable_bfs(initial::Edge, rel::Edge)` — compute the full reachable state set by BFS fixed-point (`POST_IMAGE + DIFFERENCE + UNION` loop)
+  - C shim additions: `meddly_edge_create_from_minterm_pair`, `meddly_edge_post_image`, `meddly_edge_reachable_bfs`
+
+- `is_initialized()` — returns `true` if `initialize()` has been called and `cleanup()` has not been called since; `initialize()` made idempotent (no-op on second call)
+
+### Fixed
+
+- **`var!` exponential construction cost** — previously iterated all combinations of other variables (O(∏ domain_sizes)), hanging on models with many variables or large domains. Fixed by using MEDDLY's DONT_CARE sentinel (`-1`) for all non-target variables so only O(domain_size) single-minterm `Edge` objects are needed. MEDDLY's full-reduction policy collapses the result to a compact single-level node.
+
+---
+
 ## [0.3.1] — 2026-04-26
 
 ### Added
