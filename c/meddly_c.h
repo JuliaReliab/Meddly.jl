@@ -223,6 +223,64 @@ long long meddly_node_int_value(void* forest, int node);
  * Returns the number of children written (= level size), or -1 on error. */
 int meddly_node_get_children(void* forest, int node, int* out, int out_size);
 
+/* ------------------------------------------------------------------ */
+/* Node construction                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Build a reduced node at `level` from a dense child array, and return it
+ * wrapped in a new edge.  This is the construction counterpart of
+ * meddly_node_get_children, enabling bottom-up algorithms that assemble a
+ * result MDD directly (e.g. Rauzy minsol) rather than enumerating minterms.
+ *
+ * forest   : target forest (SET forests; identity reduction is not attempted)
+ * level    : 1..num_vars(forest)
+ * children : children[i] = child node handle for variable value i (0-indexed)
+ * count    : must equal level_size(forest, level)
+ * result   : new edge owning the created node (caller must destroy)
+ *
+ * The child handles are BORROWED (e.g. straight from meddly_node_get_children
+ * or meddly_edge_get_node): this function links each one itself, so the caller
+ * keeps ownership of its own references and must still destroy its own edges.
+ *
+ * The node is passed through the forest's reduction rules, so the returned
+ * edge may be a child handle itself (redundant node) or a terminal.
+ * Returns MEDDLY_C_OK on success. */
+int meddly_create_node(void* forest, int level, const int* children,
+                       int count, void** result);
+
+/* Wrap an existing node handle in a new edge — the inverse of
+ * meddly_edge_get_node.  Lets a traversal feed a subgraph it reached back into
+ * the edge-level operations (union, difference, …).
+ *
+ * The handle is BORROWED and linked here, so whatever the caller obtained it
+ * from stays valid.  Caller must destroy the returned edge.
+ * Returns MEDDLY_C_OK on success. */
+int meddly_edge_from_node(void* forest, int node, void** result);
+
+/* ------------------------------------------------------------------ */
+/* Forest statistics                                                    */
+/* ------------------------------------------------------------------ */
+
+/* These measure what a COMPUTATION cost the forest, which is a different
+ * question from the size of its answer: the node count of a result edge is a
+ * property of the function it denotes (a fully-reduced diagram is canonical
+ * for a given variable order), so two algorithms returning the same set always
+ * agree on it.  What separates them is how many nodes they build along the way.
+ *
+ * Usage: reset_peak, run the computation, read peak. */
+
+/* Nodes currently alive in the forest (excludes deleted / to-be-deleted).
+ * Returns -1 on error. */
+long meddly_forest_current_num_nodes(void* forest);
+
+/* High-water mark of live nodes since the forest was created or the peak was
+ * last reset.  Returns -1 on error. */
+long meddly_forest_peak_num_nodes(void* forest);
+
+/* Set the peak back down to the current count, so the next computation is
+ * measured on its own.  Returns MEDDLY_C_OK on success. */
+int meddly_forest_reset_peak_num_nodes(void* forest);
+
 #ifdef __cplusplus
 }
 #endif

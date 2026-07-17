@@ -10,7 +10,8 @@ export bool_forest, copy_edge, ifthenelse
 export todot
 export NodeHandle
 export root_node, num_vars, level_size
-export is_terminal, node_level, terminal_value, node_children
+export is_terminal, node_level, terminal_value, node_children, create_node, edge_from_node
+export current_num_nodes, peak_num_nodes, reset_peak_num_nodes!
 export @match
 export MDDSession, mdd, defvar!, compile!, var!
 export mxd_singleton, post_image, reachable_bfs

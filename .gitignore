@@ -4,3 +4,4 @@ deps/deps.jl
 deps/build.log
 c/*.dylib
 c/*.so
+.DS_Store

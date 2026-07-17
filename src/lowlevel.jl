@@ -196,6 +196,39 @@ function _ll_node_get_children(f::Ptr{Cvoid}, node::Cint, out::Vector{Cint})
 end
 
 # ------------------------------------------------------------------ #
+# Node construction                                                    #
+# ------------------------------------------------------------------ #
+
+function _ll_create_node(forest::Ptr{Cvoid}, level::Cint, children::Vector{Cint})
+    result = Ref{Ptr{Cvoid}}(C_NULL)
+    ret = ccall((:meddly_create_node, libmeddly_c), Cint,
+                (Ptr{Cvoid}, Cint, Ptr{Cint}, Cint, Ref{Ptr{Cvoid}}),
+                forest, level, children, length(children), result)
+    ret, result[]
+end
+
+function _ll_edge_from_node(forest::Ptr{Cvoid}, node::Cint)
+    result = Ref{Ptr{Cvoid}}(C_NULL)
+    ret = ccall((:meddly_edge_from_node, libmeddly_c), Cint,
+                (Ptr{Cvoid}, Cint, Ref{Ptr{Cvoid}}),
+                forest, node, result)
+    ret, result[]
+end
+
+# ------------------------------------------------------------------ #
+# Forest statistics                                                    #
+# ------------------------------------------------------------------ #
+
+_ll_forest_current_num_nodes(f::Ptr{Cvoid}) =
+    ccall((:meddly_forest_current_num_nodes, libmeddly_c), Clong, (Ptr{Cvoid},), f)
+
+_ll_forest_peak_num_nodes(f::Ptr{Cvoid}) =
+    ccall((:meddly_forest_peak_num_nodes, libmeddly_c), Clong, (Ptr{Cvoid},), f)
+
+_ll_forest_reset_peak_num_nodes(f::Ptr{Cvoid}) =
+    ccall((:meddly_forest_reset_peak_num_nodes, libmeddly_c), Cint, (Ptr{Cvoid},), f)
+
+# ------------------------------------------------------------------ #
 # MxD minterm pair + image operations                                  #
 # ------------------------------------------------------------------ #
 

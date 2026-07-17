@@ -552,6 +552,114 @@ function node_children(f::AbstractForest, node::NodeHandle)
 end
 
 # ------------------------------------------------------------------ #
+# Node construction                                                    #
+# ------------------------------------------------------------------ #
+
+"""
+    create_node(f::AbstractForest, level::Integer, children::Vector{NodeHandle}) → Edge
+
+Build a reduced node at `level` whose child for variable value `i` (0-indexed)
+is `children[i+1]`, and return it wrapped in a new `Edge`.
+
+This is the construction counterpart of [`node_children`](@ref): together they
+let a bottom-up algorithm assemble a result MDD directly, instead of
+enumerating minterms and rebuilding the diagram from them.
+
+`length(children)` must equal `level_size(f, level)`, and `level` must be in
+`1:num_vars(f)`.
+
+The node is passed through the forest's reduction rules, so the returned edge
+may be one of `children` (redundant node) or a terminal:
+
+```julia
+r  = root_node(e)
+ch = node_children(f, r)
+e2 = create_node(f, node_level(f, r), ch)   # an edge equal to e
+```
+
+Child handles are borrowed — `create_node` links them internally, so edges the
+caller obtained them from stay valid and must still be destroyed as usual.
+"""
+function create_node(f::AbstractForest, level::Integer, children::Vector{NodeHandle})
+    ret, ptr = _ll_create_node(f.ptr, Cint(level), Vector{Cint}(children))
+    _check(ret)
+    _make_edge(ptr, f)
+end
+
+"""
+    edge_from_node(f::AbstractForest, node::NodeHandle) → Edge
+
+Wrap `node` in a new `Edge` — the inverse of [`root_node`](@ref).
+
+Use it to hand a subgraph reached by traversal back to the edge-level
+operations (`|`, `&`, `setdiff`, `cardinality`, …):
+
+```julia
+ch  = node_children(f, root_node(e))
+sub = edge_from_node(f, ch[1])      # the 0-branch as an Edge in its own right
+cardinality(sub)
+```
+
+The handle is borrowed and linked internally, so the edge it was reached
+through stays valid.
+"""
+function edge_from_node(f::AbstractForest, node::NodeHandle)
+    ret, ptr = _ll_edge_from_node(f.ptr, Cint(node))
+    _check(ret)
+    _make_edge(ptr, f)
+end
+
+# ------------------------------------------------------------------ #
+# Forest statistics                                                    #
+# ------------------------------------------------------------------ #
+
+"""
+    current_num_nodes(f::AbstractForest) → Int
+
+Number of nodes currently alive in `f` (deleted nodes excluded).
+"""
+function current_num_nodes(f::AbstractForest)
+    n = _ll_forest_current_num_nodes(f.ptr)
+    n < 0 && error("MEDDLY error in current_num_nodes: $(_last_error_msg())")
+    Int(n)
+end
+
+"""
+    peak_num_nodes(f::AbstractForest) → Int
+
+High-water mark of live nodes in `f`, since creation or the last
+[`reset_peak_num_nodes!`](@ref).
+
+This measures what a *computation* cost the forest, which is a different
+question from how big its answer is: the node count of a result edge is a
+property of the function it denotes — a fully-reduced diagram is canonical for
+a given variable order — so two algorithms that return the same set always
+agree on it. What tells them apart is how many nodes they build on the way:
+
+```julia
+reset_peak_num_nodes!(f)
+result = my_algorithm(...)
+peak_num_nodes(f)      # nodes the algorithm needed at once
+```
+"""
+function peak_num_nodes(f::AbstractForest)
+    n = _ll_forest_peak_num_nodes(f.ptr)
+    n < 0 && error("MEDDLY error in peak_num_nodes: $(_last_error_msg())")
+    Int(n)
+end
+
+"""
+    reset_peak_num_nodes!(f::AbstractForest)
+
+Drop the peak back to the current node count, so the next computation is
+measured on its own rather than against everything the forest has ever held.
+"""
+function reset_peak_num_nodes!(f::AbstractForest)
+    _check(_ll_forest_reset_peak_num_nodes(f.ptr))
+    return f
+end
+
+# ------------------------------------------------------------------ #
 # DOT visualisation (pure Julia, no temp files)                        #
 # ------------------------------------------------------------------ #
 

@@ -5,6 +5,23 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.0] — 2026-07-18
+
+### Added
+
+- **Node construction API** — the inverse direction of the traversal primitives, letting an algorithm assemble a result diagram bottom-up instead of enumerating minterms and rebuilding from them:
+  - `create_node(f, level, children::Vector{NodeHandle})` — build a reduced node at `level` from a dense child array and return it as an `Edge`. Wraps the `newWritable → setFull → createReducedNode` sequence (the same MEDDLY calls `ite_mt` uses). Borrowed child handles are linked internally.
+  - `edge_from_node(f, node)` — the inverse of `root_node`: wrap a node handle reached by traversal back into an `Edge` so it can feed the edge-level operations (`setdiff`, `|`, `cardinality`, …).
+  - C shim additions: `meddly_create_node`, `meddly_edge_from_node`.
+
+- **Forest node-count statistics** — `current_num_nodes(f)`, `peak_num_nodes(f)`, `reset_peak_num_nodes!(f)` (wrapping `forest::getCurrentNumNodes` / `getPeakNumNodes` / `resetPeakNumNodes`). The peak measures what a *computation* costs the forest; the node count of a result edge cannot, since a fully-reduced diagram is canonical for a given variable order (hash-consed), so two algorithms returning the same set share the same nodes. C shim additions: `meddly_forest_current_num_nodes`, `meddly_forest_peak_num_nodes`, `meddly_forest_reset_peak_num_nodes`.
+
+### Fixed
+
+- **Segfault when a domain and its forests are garbage-collected together.** MEDDLY's `~domain` deletes every forest registered to it ("a domain owns its forests"), but the Julia forest finalizer also called `forest::destroy` (= `delete`). When the whole object graph became unreachable at once, Julia's unspecified finalizer order let `~domain` run first and free the forests, after which the forest finalizer double-freed them. Fixed by (a) guarding the forest finalizers so `forest::destroy` runs only while the domain is still alive (`domain.ptr != C_NULL`), and (b) an initialization-generation guard on all finalizers so a finalizer that runs after `cleanup()` — or after a `cleanup()`/`initialize()` cycle that invalidated its pointer — skips the C++ destroy instead of touching torn-down MEDDLY state. Edge-vs-forest order was already safe (`dd_edge` resolves its forest by id, null after the forest is gone).
+
+---
+
 ## [0.4.0] — 2026-05-11
 
 ### Added

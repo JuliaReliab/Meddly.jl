@@ -191,3 +191,113 @@ end
     @test !is_terminal(NodeHandle(1))
     @test !is_terminal(NodeHandle(42))
 end
+
+# ---------------------------------------------------------------------------
+# create_node — the construction counterpart of node_children.
+# ---------------------------------------------------------------------------
+
+@testset "create_node round-trip" begin
+    dom = Domain([3, 3, 3])
+    f   = MDDForestBool(dom)
+    e   = Edge(f, [0, 1, 2]) | Edge(f, [1, 1, 2]) | Edge(f, [2, 0, 1])
+    r   = root_node(e)
+
+    rebuilt = create_node(f, node_level(f, r), node_children(f, r))
+
+    # Nodes are hash-consed, so rebuilding an identical node must return the
+    # very same handle — this also proves the child references are correct.
+    @test root_node(rebuilt) == r
+    @test cardinality(rebuilt) == cardinality(e)
+end
+
+@testset "create_node applies reduction rules" begin
+    dom = Domain([3, 3, 3])
+    f   = MDDForestBool(dom)
+    sub = root_node(Edge(f, [0, 0, 0]) | Edge(f, [0, 0, 1]) | Edge(f, [0, 0, 2]))
+
+    # All children equal ⇒ redundant node ⇒ the child itself comes back.
+    @test root_node(create_node(f, 3, NodeHandle[sub, sub, sub])) == sub
+end
+
+@testset "create_node borrows child handles" begin
+    dom = Domain([3, 3, 3])
+    f   = MDDForestBool(dom)
+    e   = Edge(f, [0, 1, 2]) | Edge(f, [1, 1, 2]) | Edge(f, [2, 0, 1])
+    r   = root_node(e)
+    ch  = node_children(f, r)
+
+    # Dropping a node built from `ch` must not disturb the edge they came from.
+    built = create_node(f, node_level(f, r), ch)
+    finalize(built)
+    GC.gc()
+
+    @test cardinality(e) == 3.0
+    @test node_children(f, r) == ch
+end
+
+@testset "edge_from_node" begin
+    dom = Domain([3, 3, 3])
+    f   = MDDForestBool(dom)
+    e   = Edge(f, [0, 1, 2]) | Edge(f, [1, 1, 2]) | Edge(f, [2, 0, 1])
+    r   = root_node(e)
+
+    # Inverse of root_node.
+    @test root_node(edge_from_node(f, r)) == r
+    @test cardinality(edge_from_node(f, r)) == cardinality(e)
+
+    # Terminals: false ⇒ empty, true ⇒ the whole space.
+    @test cardinality(edge_from_node(f, NodeHandle(0))) == 0.0
+    @test cardinality(edge_from_node(f, NodeHandle(-1))) == 27.0
+
+    # A wrapped subgraph can be used with the edge-level operations.
+    ch  = node_children(f, r)
+    sub = edge_from_node(f, ch[2])
+    @test cardinality(sub) > 0
+
+    # Dropping the wrapper must not disturb the edge it was reached through.
+    finalize(sub)
+    GC.gc()
+    @test cardinality(e) == 3.0
+    @test node_children(f, r) == ch
+end
+
+@testset "forest statistics" begin
+    dom = Domain([3, 3, 3])
+    f   = MDDForestBool(dom)
+
+    @test current_num_nodes(f) == 0
+    @test peak_num_nodes(f) == 0
+
+    e = Edge(f, [0, 1, 2]) | Edge(f, [1, 1, 2]) | Edge(f, [2, 0, 1])
+    n1 = current_num_nodes(f)
+    @test n1 > 0
+    @test peak_num_nodes(f) >= n1
+
+    # Reset drops the peak to the current count, so a later computation is
+    # measured on its own.
+    reset_peak_num_nodes!(f)
+    @test peak_num_nodes(f) == current_num_nodes(f)
+
+    before = current_num_nodes(f)
+    e2 = Edge(f, [0, 0, 0]) | Edge(f, [1, 1, 1]) | Edge(f, [2, 2, 2])
+    @test current_num_nodes(f) > before
+    @test peak_num_nodes(f) >= current_num_nodes(f)
+
+    # The forest holds more than any single result: the peak is a property of
+    # the computation, an edge's own node count a property of its function.
+    internal_of_e2 = count(n -> !is_terminal(n), _all_nodes(f, root_node(e2)))
+    @test peak_num_nodes(f) >= internal_of_e2
+end
+
+@testset "create_node argument checks" begin
+    dom = Domain([3, 3, 3])
+    f   = MDDForestBool(dom)
+    e   = Edge(f, [0, 1, 2]) | Edge(f, [1, 1, 2])
+    r   = root_node(e)
+    lv  = node_level(f, r)
+    ch  = node_children(f, r)
+
+    @test_throws ErrorException create_node(f, lv, ch[1:end-1])   # count ≠ level size
+    @test_throws ErrorException create_node(f, 0, ch)             # level too low
+    @test_throws ErrorException create_node(f, num_vars(f) + 1, ch)
+end

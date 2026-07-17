@@ -550,6 +550,29 @@ run(`dot -Tpng edge.dot -o edge.png`)
 | `terminal_value(f, node)` | Decoded terminal: `Bool` or `Int` |
 | `node_children(f, node)` | Dense `Vector{NodeHandle}` of all children |
 
+### Construction
+
+The inverse of the traversal primitives — assemble a result diagram bottom-up.
+
+| Expression | Description |
+|---|---|
+| `create_node(f, level, children)` | Reduced node at `level` from a dense `Vector{NodeHandle}` (inverse of `node_children`); returns an `Edge` |
+| `edge_from_node(f, node)` | Wrap a `NodeHandle` back into an `Edge` (inverse of `root_node`) |
+
+### Forest statistics
+
+`peak_num_nodes` measures what a *computation* costs the forest. The node count
+of a result edge does not distinguish algorithms: a fully-reduced diagram is
+canonical for a given variable order (hash-consed), so two methods returning the
+same set share the same nodes. What differs is how many nodes each builds on the
+way — measure on a fresh forest per method.
+
+| Expression | Description |
+|---|---|
+| `current_num_nodes(f)` | Live nodes currently in the forest |
+| `peak_num_nodes(f)` | High-water mark of live nodes since creation / last reset |
+| `reset_peak_num_nodes!(f)` | Drop the peak to the current count, to measure the next computation on its own |
+
 ---
 
 ## Architecture

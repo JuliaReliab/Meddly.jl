@@ -767,5 +767,108 @@ int meddly_node_get_children(void* forest, int node, int* out, int out_size) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Node construction                                                    */
+/* ------------------------------------------------------------------ */
+
+int meddly_create_node(void* forest, int level, const int* children,
+                       int count, void** result) {
+    if (!forest || !children || !result) {
+        set_error("meddly_create_node: null argument");
+        return MEDDLY_C_ERR_NULL;
+    }
+    try {
+        MEDDLY::forest* f = static_cast<MEDDLY::forest*>(forest);
+        if (level < 1 || level > (int)f->getNumVariables()) {
+            set_error("meddly_create_node: level out of range");
+            return MEDDLY_C_ERR_INVALID;
+        }
+        if (count != (int)f->getLevelSize(level)) {
+            set_error("meddly_create_node: count != level size");
+            return MEDDLY_C_ERR_INVALID;
+        }
+        MEDDLY::unpacked_node* nb =
+            MEDDLY::unpacked_node::newWritable(f, level, MEDDLY::FULL_ONLY);
+        for (int i = 0; i < count; i++) {
+            /* setFull stores the handle raw, so it must be handed an owned
+             * reference; the caller's handles are borrowed. */
+            nb->setFull((unsigned)i, f->linkNode(children[i]));
+        }
+        /* Recycles nb.  Default in = -1: no identity reduction (SET forest). */
+        MEDDLY::edge_value dummy;
+        MEDDLY::node_handle node = 0;
+        f->createReducedNode(nb, dummy, node);
+        MEDDLY::dd_edge* res = new MEDDLY::dd_edge(f);
+        res->set(node);  /* takes ownership of the createReducedNode reference */
+        *result = static_cast<void*>(res);
+        return MEDDLY_C_OK;
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_create_node"); }
+    return MEDDLY_C_ERR_EXCEPT;
+}
+
+int meddly_edge_from_node(void* forest, int node, void** result) {
+    if (!forest || !result) {
+        set_error("meddly_edge_from_node: null argument");
+        return MEDDLY_C_ERR_NULL;
+    }
+    try {
+        MEDDLY::forest* f = static_cast<MEDDLY::forest*>(forest);
+        MEDDLY::dd_edge* e = new MEDDLY::dd_edge(f);
+        /* The caller's handle is borrowed, so take a reference of our own. */
+        e->set_and_link(node);
+        *result = static_cast<void*>(e);
+        return MEDDLY_C_OK;
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_edge_from_node"); }
+    return MEDDLY_C_ERR_EXCEPT;
+}
+
+/* ------------------------------------------------------------------ */
+/* Forest statistics                                                    */
+/* ------------------------------------------------------------------ */
+
+long meddly_forest_current_num_nodes(void* forest) {
+    if (!forest) {
+        set_error("meddly_forest_current_num_nodes: null argument");
+        return -1;
+    }
+    try {
+        return static_cast<MEDDLY::forest*>(forest)->getCurrentNumNodes();
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_forest_current_num_nodes"); }
+    return -1;
+}
+
+long meddly_forest_peak_num_nodes(void* forest) {
+    if (!forest) {
+        set_error("meddly_forest_peak_num_nodes: null argument");
+        return -1;
+    }
+    try {
+        return static_cast<MEDDLY::forest*>(forest)->getPeakNumNodes();
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_forest_peak_num_nodes"); }
+    return -1;
+}
+
+int meddly_forest_reset_peak_num_nodes(void* forest) {
+    if (!forest) {
+        set_error("meddly_forest_reset_peak_num_nodes: null argument");
+        return MEDDLY_C_ERR_NULL;
+    }
+    try {
+        static_cast<MEDDLY::forest*>(forest)->resetPeakNumNodes();
+        return MEDDLY_C_OK;
+    } catch (const MEDDLY::error& e) { set_error(e.getName()); }
+      catch (const std::exception& e) { set_error(e.what()); }
+      catch (...) { set_error("unknown exception in meddly_forest_reset_peak_num_nodes"); }
+    return MEDDLY_C_ERR_EXCEPT;
+}
+
+/* ------------------------------------------------------------------ */
 } // extern "C"
 /* ------------------------------------------------------------------ */
