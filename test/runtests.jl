@@ -38,6 +38,7 @@ using Meddly
     include("test_traverse.jl")
     include("test_match.jl")
     include("test_session.jl")
+    include("test_cleanup_safety.jl")   # LAST: toggles cleanup()/initialize()
 
     cleanup()
 

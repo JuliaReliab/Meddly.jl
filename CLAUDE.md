@@ -17,13 +17,33 @@ julia --project=. test/runtests.jl
 `Pkg.test()` is broken in Julia 1.12 for stdlib deps; use the direct form above.
 
 ### Rebuild shim only (after editing `c/meddly_c.cpp`)
+
+Julia loads the path recorded in `deps/deps.jl`, which `deps/build.jl` writes as
+`deps/usr/lib/libmeddly_c.dylib`. So rebuild **to that path** — replay steps 6–7 of
+`build.jl` against the already-built `deps/usr/lib/libmeddly.a`:
+
 ```sh
-# The built MEDDLY static lib is at deps/usr/lib/libmeddly.a
-# and the install prefix is deps/usr/
-cd c
-make MEDDLY_PREFIX=../deps/usr
+clang++ -O2 -std=c++14 -fPIC -Ideps/usr/include \
+        -dynamiclib -install_name @rpath/libmeddly_c.dylib \
+        -o deps/usr/lib/libmeddly_c.dylib \
+        c/meddly_c.cpp deps/usr/lib/libmeddly.a
 ```
-Or re-run `Pkg.build` which always rebuilds from scratch.
+
+Two traps here:
+
+- **`cd c && make MEDDLY_PREFIX=../deps/usr` does not update what Julia loads.** The
+  Makefile has no install target: it writes `c/libmeddly_c.dylib`, which nothing reads
+  (`CLAUDE.md` calls that file a stale artifact for exactly this reason). It compiles, the
+  tests run, and the edit silently has no effect.
+- **`Pkg.build` is not a safe "just rebuild" button.** Step 1 of `build.jl` *deletes and
+  re-clones* MEDDLY at `MEDDLY_REF = "master"` — unpinned. The shim is written against the
+  current checkout (`deps/meddly-src`, commit `f8a89d0`); a fresh master may not match.
+  Use it for a first-time setup, not to pick up a shim edit.
+
+If `deps/deps.jl` points somewhere that does not exist (e.g. the package was built in one
+directory and then copied elsewhere), `using Meddly` fails to find the library. Rewrite the
+path in `deps/deps.jl` by hand — it is generated, git-ignored, and holds a single absolute
+path.
 
 ### Verify the built library path
 ```sh
@@ -45,7 +65,10 @@ src/highlevel.jl    ← public API: initialize/cleanup, set ops (|, &, setdiff),
                       bool_forest, copy_edge, ifthenelse, @match,
                       todot, cardinality, is_empty,
                       traversal (root_node, num_vars, level_size, is_terminal,
-                                 node_level, terminal_value, node_children)
+                                 node_level, terminal_value, node_children),
+                      construction (create_node, edge_from_node),
+                      forest stats (current_num_nodes, peak_num_nodes,
+                                    reset_peak_num_nodes!)
 src/types.jl        ← abstract type AbstractForest; concrete types
                       MDDForestBool, MDDForestInt, Domain, Edge
                       each holds a Ptr{Cvoid} + a reference to its parent
@@ -94,6 +117,57 @@ Pattern: `newFromNode` → iterate `un->down(i)` → `unpacked_node::Recycle(un)
 In a fully-reduced MDD, a child's level may be lower than `parent_level - 1`.
 Skipped levels act as redundant nodes; `evaluate`-style algorithms must use
 `node_level(f, child)` rather than assuming `parent_level - 1`.
+
+### Node construction API (v0.5.0)
+
+The construction counterpart of the traversal API. Together they let an algorithm assemble
+a **result diagram bottom-up** instead of enumerating minterms and rebuilding from them —
+which is what makes an output-compressed Rauzy `minsol` (rims Algorithm 3) possible.
+
+- `create_node(f, level, children::Vector{NodeHandle})` → `Edge`. Wraps
+  `unpacked_node::newWritable(f, level, FULL_ONLY)` → `setFull(i, …)` →
+  `forest::createReducedNode(nb, ev, node)`, the same sequence `ite_mt` runs internally.
+  `length(children)` must equal `level_size(f, level)`.
+- `edge_from_node(f, node)` → `Edge`. The inverse of `root_node`: hands a subgraph reached
+  by traversal back to the edge-level ops (`setdiff`, `|`, `cardinality`, …).
+
+**Ownership is the thing to get right here.** `unpacked_node::setFull(n, h)` is just
+`_down[n] = h` — it stores the handle raw and does **not** link it, so it must be handed an
+*owned* reference. `ite_mt` satisfies that naturally (its children come from recursive calls
+that already carry a reference), but handles crossing the C boundary from Julia are
+**borrowed** (`node_children`, `root_node`). So `meddly_create_node` calls `f->linkNode(child)`
+on each, and `meddly_edge_from_node` uses `dd_edge::set_and_link` rather than `set`
+(`set` takes ownership, `set_and_link` borrows — both exist for this distinction).
+Getting this wrong does not fail loudly: refcounts drift and nodes are freed while still
+referenced.
+
+`createReducedNode`'s 4th argument `in` is the incoming-edge index used for **identity
+reduction** (MxD). It defaults to `-1` = do not attempt identity reduction, which is what
+SET forests want; `meddly_create_node` relies on that default.
+
+Results pass through the forest's reduction rules, so `create_node` may return one of the
+children (redundant node) or a terminal.
+
+### Forest statistics (v0.5.0)
+
+`current_num_nodes(f)` / `peak_num_nodes(f)` / `reset_peak_num_nodes!(f)` wrap
+`forest::getCurrentNumNodes` / `getPeakNumNodes` / `resetPeakNumNodes`.
+
+These exist because **the node count of a result edge cannot compare two algorithms**: a
+fully-reduced diagram is canonical for a given variable order, and MEDDLY hash-conses, so
+two methods computing the same set in the same forest return *literally the same node
+handle*. The result's size is a property of the answer, not of the method. What separates
+methods is how many nodes they build on the way:
+
+```julia
+reset_peak_num_nodes!(f)
+before = current_num_nodes(f)
+result = my_algorithm(...)
+peak_num_nodes(f) - before      # nodes this computation needed at once
+```
+
+Measure on a **fresh forest** per method — hash-consing means a warm forest lets whichever
+method runs second reuse the first one's nodes, which shows up as an implausibly low peak.
 
 ### `ifthenelse` design
 `ifthenelse(c, t, e)` dispatches on the type of `c.forest`:
@@ -349,3 +423,70 @@ in `meddly/minterms.h`: `const int DONT_CARE = -1`.
 - MxD and MDD edges must share the same `Domain` — checked by `MEDDLY::apply` at call time
 - DONT_CARE = -1 works for both primed and unprimed positions in `setVars` (MEDDLY uses
   the same sentinel for both); confirmed in MEDDLY 0.18.x `minterms.h`
+
+### 2026-07-17 — node construction + forest stats（`create_node` 露出）
+
+**Done（すべて未コミット）:**
+- **`create_node` を C 関数として露出**（MDDMinsol の宿題「能力は `ite_mt` にあり 1 C 関数で
+  露出」の実行）。`c/meddly_c.cpp` に `meddly_create_node`、`c/meddly_c.h` に宣言、
+  `src/lowlevel.jl` に `_ll_create_node`、`src/highlevel.jl` に `create_node`。
+  - `setFull` は `_down[n]=h` の代入のみで link しないことをソースで確認（`unpacked_node.h:652`）。
+    Julia から渡るハンドルは借用なので `f->linkNode(child)` を内部で行う。
+  - `createReducedNode` の `in` は identity reduction 用で既定 `-1`（`forest.h:214`）。SET forest
+    にはこれが正しい。
+- **`edge_from_node` を追加**（`root_node` の逆）。`dd_edge::set_and_link` を使用（`set` は所有権を
+  取る／`set_and_link` は借用、両方が存在するのはこの区別のため）。`setdiff` に走査で到達した
+  部分グラフを渡すのに必要だった。
+- **forest 統計 3 関数**（`current_num_nodes` / `peak_num_nodes` / `reset_peak_num_nodes!`）。
+  動機は下記の「標準形」の発見。
+- `test/test_traverse.jl` に 5 testset 追加（round-trip が**同一ハンドル**を返すこと、簡約規則の
+  発火、借用ハンドルの健全性、引数チェック、統計）。**193 → 216 tests**。
+- 実運用上の修正: `deps/deps.jl` が `/Users/okamu/Documents/ORSJ202609テスト/...`（存在しない
+  パス）を指しており、この配置では `using Meddly` が失敗する状態だった。書き換え済み（生成物・
+  git 管理外）。
+
+**発見（記録の価値が高い）:**
+- **結果 MDD の節点数は手法の比較軸にならない。** 同じ集合・同じ変数順序・同じ forest なら
+  完全簡約 MDD は標準形で、hash-consing により両手法が **literally 同一の節点ハンドル**を返す
+  （MDDMinsol の 108 ケース全部で確認）。結果サイズは「答え」の性質。手法を分けるのは
+  **計算途中の peak** → forest 統計を追加した理由。
+- **`cd c && make` は Julia が読む dylib を更新しない**（Makefile に install ターゲットが無く、
+  `c/libmeddly_c.dylib` は誰も読まない）。CLAUDE.md の該当手順を修正済み。
+- **`Pkg.build` は安全な再ビルド手段ではない**: `MEDDLY_REF = "master"` を削除・再クローンする。
+  シムは現 checkout（`f8a89d0`）向けに書かれている。
+
+**Pending（次エントリで解消）:**
+- **GC ファイナライザ由来の segfault は未修正**（Known limitations 参照）。計測は回避策で凌いだ。
+- `Project.toml` は 0.4.0 のまま。今回の 3 API はバージョン未確定・CHANGELOG 未記載。
+- README の API 表に新 3 API 未反映。
+
+### 2026-07-18 — GC ファイナライザ segfault 修正 ＋ v0.5.0 リリース整備
+
+**Done:**
+- **前エントリ Pending の segfault を修正。** 根本原因は**二重 delete**（ダングリング参照ではない）。
+  MEDDLY の `~domain` は自分に登録された forest を `delete` する（`domain.cc:437`、"domain owns
+  its forests"）。Julia の forest ファイナライザも `forest::destroy`（= `delete`）を呼ぶため、
+  domain とその forest が同時回収され、domain ファイナライザが先に走ると forest を二重解放していた。
+  ファイナライザ順序が非決定的なのでクラッシュも非決定的だった。
+  - **順序ガード**: forest ファイナライザ（`types.jl` の 3 forest 型）は `x.domain.ptr != C_NULL`
+    のときだけ `forest::destroy` を呼ぶ。domain 破棄済みなら skip（二重 delete 回避）。
+  - **世代ガード**: `highlevel.jl` に `_meddly_generation`（`initialize` の実初期化で +1）。全
+    ファイナライザは「初期化中かつ世代一致」のときだけ C++ destroy を呼ぶ。cleanup 後・
+    cleanup→reinit 後の解放済み状態アクセスを防ぐ。各構造体に `gen::Int` フィールド追加。
+  - edge 方向は元々安全（`dd_edge` は id 参照、forest 消滅後は no-op）なので順序ガード不要。
+  - 回帰テスト: `test/test_misc.jl`（全体同時回収）、`test/test_cleanup_safety.jl`（新規・cleanup /
+    reinit、runtests の最後で cleanup/initialize を切り替える）。**216 → 219 tests**。
+    再現スクリプトは修正前 3/3 crash → 修正後 3/3 SURVIVED、スイート 5 連続通過。
+- **v0.5.0 リリース整備**: `Project.toml` 0.4.0 → 0.5.0、`CHANGELOG.md` に 0.5.0（Added: ノード
+  構築・forest 統計 / Fixed: GC segfault）、`README.md` に Construction・Forest statistics 表 ＋
+  「Memory ownership」段落を書き直し（ガード付きファイナライザ）。CLAUDE.md の `(unreleased)`
+  ラベル → `(v0.5.0)`、Known limitations の segfault 項を削除。
+
+**Notes for next session:**
+- ファイナライザは逐次実行（インターリーブしない）前提。`x.domain.ptr` の読み取りは、
+  参照先 Julia オブジェクトがファイナライザ完了までメモリ解放されないので安全。
+- `MEDDLY::cleanup()` はグローバル全破棄。世代ガードにより cleanup 後の finalizer は C++ destroy を
+  skip するため、そのセッションの `dd_edge` ラッパーはリークするが、cleanup は通常プロセス終了時
+  なので許容（`_make_edge` のコメント参照）。
+- MDDMinsol 側の計測回避策（`compare_edge.jl` の `KEEP` 退避・GC 抑止）は原理的に不要になった
+  （撤去は別作業）。

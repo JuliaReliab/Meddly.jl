@@ -11,6 +11,7 @@ mutable struct Domain
     ptr::Ptr{Cvoid}
     labels::Vector{String}  # labels[k] = name for variable at level k (1-indexed)
                              # empty vector → todot falls back to "x{k}"
+    gen::Int                 # initialize()-generation this object was created in
 
     function Domain(level_sizes::Vector{Int};
                     labels::Vector{String} = String[])
@@ -19,10 +20,15 @@ mutable struct Domain
             error("labels length ($(length(labels))) must equal level count ($(length(level_sizes)))")
         sizes = Cint.(level_sizes)
         ptr = _check_ptr(_ll_domain_create(sizes))
-        d = new(ptr, labels)
+        d = new(ptr, labels, _meddly_generation[])
         finalizer(d) do x
             if x.ptr != C_NULL
-                _ll_domain_destroy(x.ptr)
+                # Skip the C++ destroy if the library was cleaned up (or
+                # re-initialized) since this object was created — MEDDLY has
+                # already torn its objects down. See _meddly_generation.
+                if _meddly_initialized[] && _meddly_generation[] == x.gen
+                    _ll_domain_destroy(x.ptr)
+                end
                 x.ptr = C_NULL
             end
         end
@@ -84,13 +90,21 @@ mutable struct MDDForestBool <: AbstractForest
     ptr::Ptr{Cvoid}
     domain::Domain
     _int_forest::WeakRef   # back-reference to the paired MDDForestInt (if any)
+    gen::Int               # initialize()-generation this object was created in
 
     function MDDForestBool(domain::Domain; kind::Symbol = :mdd)
         ptr = _check_ptr(_ll_forest_create(domain.ptr, _kind_int(kind), _RANGE_BOOLEAN))
-        f = new(ptr, domain, WeakRef(nothing))
+        f = new(ptr, domain, WeakRef(nothing), _meddly_generation[])
         finalizer(f) do x
             if x.ptr != C_NULL
-                _ll_forest_destroy(x.ptr)
+                # Only destroy while the library is up, the generation matches,
+                # AND the domain is still alive: MEDDLY's ~domain deletes its
+                # forests, so if the domain finalizer already ran, destroying
+                # here would be a double free. See _meddly_generation.
+                if _meddly_initialized[] && _meddly_generation[] == x.gen &&
+                   x.domain.ptr != C_NULL
+                    _ll_forest_destroy(x.ptr)
+                end
                 x.ptr = C_NULL
             end
         end
@@ -110,13 +124,19 @@ Used to represent transition relations for image operations.
 mutable struct MDDForestBoolMxD <: AbstractForest
     ptr::Ptr{Cvoid}
     domain::Domain
+    gen::Int               # initialize()-generation this object was created in
 
     function MDDForestBoolMxD(domain::Domain)
         ptr = _check_ptr(_ll_forest_create(domain.ptr, _FOREST_MXD, _RANGE_BOOLEAN))
-        f = new(ptr, domain)
+        f = new(ptr, domain, _meddly_generation[])
         finalizer(f) do x
             if x.ptr != C_NULL
-                _ll_forest_destroy(x.ptr)
+                # See MDDForestBool: guard on library/generation and domain
+                # liveness to avoid a double free via ~domain.
+                if _meddly_initialized[] && _meddly_generation[] == x.gen &&
+                   x.domain.ptr != C_NULL
+                    _ll_forest_destroy(x.ptr)
+                end
                 x.ptr = C_NULL
             end
         end
@@ -140,16 +160,24 @@ mutable struct MDDForestInt <: AbstractForest
     ptr::Ptr{Cvoid}
     domain::Domain
     bool_forest::MDDForestBool  # paired boolean forest (eagerly created)
+    gen::Int                    # initialize()-generation this object was created in
 
     function MDDForestInt(domain::Domain; kind::Symbol = :mdd)
         k   = _kind_int(kind)
         ptr = _check_ptr(_ll_forest_create(domain.ptr, k, _RANGE_INTEGER))
         bf  = MDDForestBool(domain; kind = kind)
-        f   = new(ptr, domain, bf)
+        f   = new(ptr, domain, bf, _meddly_generation[])
         bf._int_forest = WeakRef(f)   # back-reference for scalar ifthenelse
         finalizer(f) do x
             if x.ptr != C_NULL
-                _ll_forest_destroy(x.ptr)
+                # See MDDForestBool: guard on library/generation and domain
+                # liveness to avoid a double free via ~domain.  (The paired
+                # bool_forest is a separate object with its own guarded
+                # finalizer.)
+                if _meddly_initialized[] && _meddly_generation[] == x.gen &&
+                   x.domain.ptr != C_NULL
+                    _ll_forest_destroy(x.ptr)
+                end
                 x.ptr = C_NULL
             end
         end
@@ -167,10 +195,11 @@ Base.show(io::IO, f::MDDForestInt) =
 mutable struct Edge
     ptr::Ptr{Cvoid}
     forest::AbstractForest  # keep forest (and transitively domain) alive
+    gen::Int                # initialize()-generation this object was created in
 
     # Raw constructor: just stores fields, no finalizer.
     # Use _make_edge() or the public Edge(forest[, values]) constructors instead.
-    Edge(ptr::Ptr{Cvoid}, forest::AbstractForest) = new(ptr, forest)
+    Edge(ptr::Ptr{Cvoid}, forest::AbstractForest) = new(ptr, forest, _meddly_generation[])
 end
 
 # Internal factory: wraps a raw C pointer and registers the finalizer.
@@ -178,7 +207,13 @@ function _make_edge(ptr::Ptr{Cvoid}, forest::AbstractForest)
     e = Edge(ptr, forest)
     finalizer(e) do x
         if x.ptr != C_NULL
-            _ll_edge_destroy(x.ptr)
+            # Skip the delete if the library was cleaned up / re-initialized
+            # since creation (torn-down MEDDLY state).  Edge-vs-forest order is
+            # otherwise safe: dd_edge resolves its forest by id, null after the
+            # forest is gone.  See _meddly_generation.
+            if _meddly_initialized[] && _meddly_generation[] == x.gen
+                _ll_edge_destroy(x.ptr)
+            end
             x.ptr = C_NULL
         end
     end

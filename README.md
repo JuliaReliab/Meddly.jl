@@ -615,8 +615,16 @@ large models.
 
 **Memory ownership:** each Julia struct holds a `Ptr{Cvoid}` to a C++-heap
 object; its finalizer calls the matching `meddly_*_destroy` function.  Each
-child holds a reference to its parent (`Edge → AbstractForest → Domain`) so
-the parent cannot be GC'd while the child is alive.
+child holds a reference to its parent (`Edge → AbstractForest → Domain`) so the
+parent cannot be GC'd *while the child is reachable* — but that reference does
+**not** order finalizers once a whole graph becomes unreachable at once.  Since
+MEDDLY's `~domain` deletes the forests registered to it, the forest finalizers
+guard on `domain.ptr != C_NULL` and skip `forest::destroy` when the domain has
+already been torn down, avoiding a double free.  All finalizers additionally
+carry an initialization-generation guard, so a finalizer running after
+`cleanup()` (or after a `cleanup()`/`initialize()` cycle) skips the C++ destroy
+rather than touching freed MEDDLY state.  Edge-vs-forest order needs no guard:
+`dd_edge` resolves its forest by id and is a no-op once the forest is gone.
 
 ---
 

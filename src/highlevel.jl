@@ -6,6 +6,14 @@
 
 const _meddly_initialized = Ref(false)
 
+# Bumped on every real initialize().  Each object records the generation it was
+# created in (`gen` field); a finalizer only calls the C++ destructor when the
+# library is still initialized AND the current generation matches — so a
+# finalizer that runs after cleanup() (or after a cleanup()/initialize() cycle
+# that invalidated the old pointers) skips the destroy instead of touching
+# torn-down MEDDLY state.  See src/types.jl.
+const _meddly_generation = Ref(0)
+
 """
     initialize()
 
@@ -17,6 +25,7 @@ function initialize()
     _meddly_initialized[] && return
     _check(_ll_initialize())
     _meddly_initialized[] = true
+    _meddly_generation[] += 1
 end
 
 """
