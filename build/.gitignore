@@ -1,0 +1,7 @@
+# BinaryBuilder outputs and scratch (not part of the package)
+Manifest.toml
+products/
+*-linux-gnu*/
+*-apple-darwin*/
+*-w64-mingw32*/
+*.tar.gz
