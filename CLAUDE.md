@@ -491,3 +491,34 @@ in `meddly/minterms.h`: `const int DONT_CARE = -1`.
   なので許容（`_make_edge` のコメント参照）。
 - MDDMinsol 側の計測回避策（`compare_edge.jl` の `KEEP` 退避・GC 抑止）は原理的に不要になった
   （撤去は別作業）。
+
+### 2026-07-18 — JLL 化（`libmeddly_c_jll`）＋ソースビルド廃止（v0.6.0）
+
+**Done:**
+- **シムをプリコンパイル配布に移行。** `libmeddly_c`（MEDDLY 静的リンク済み）を BinaryBuilder で
+  ビルドし `libmeddly_c_jll` として配布。**`deps/build.jl` を削除**（インストール時のソースビルド・
+  autotools・C++ コンパイラが不要に）。`src/Meddly.jl` と `test/runtests.jl` は
+  `libmeddly_c_jll.libmeddly_c` からライブラリを解決（`LIBMEDDLY_C_PATH` は開発用オーバーライドで存続）。
+  `src/lowlevel.jl` は無変更（束縛名 `libmeddly_c_path` を保った）。
+- **`deps/` は完全に廃止**。`deps/build.jl` を git から削除、`.gitignore` を `deps/` 全体無視に変更。
+  ローカルの `deps/`（旧 MEDDLY クローン＋ビルド成果物、46MB の死んだ残骸）も `rm -rf` で削除済み。
+  削除後も 219 tests は JLL 経由で通る（＝ deps/ は完全に非参照だった証明）。
+  → **本ファイル内の古い Session Log（2026-04-26）にある「authoritative build output は
+  `deps/usr/lib/libmeddly_c.dylib`」等の記述は失効**。現在の真実は「バイナリは `libmeddly_c_jll`」。
+- **バージョン 0.6.0**（パッケージング変更・公開 API 不変）。v0.5.0 タグは source-build 版の意味で温存。
+- **配布経路（Route B）**: `JuliaReliab/libmeddly_c_jll.jl`（wrapper repo）＋ Release にバイナリ、
+  自前レジストリ `JuliaReliab/Registry` に **libmeddly_c_jll と Meddly 本体の両方を登録**。
+  利用者は `Pkg.Registry.add(自前) → Pkg.add("Meddly")` の2行で導入（コンパイラ不要、検証済み）。
+- ビルドツールは `build/`（`build_tarballs.jl` 本番／`build_tarballs_local.jl` 検証用／runbook）。
+  4プラットフォーム（x86_64・aarch64 × Linux・macOS）でビルド実証、macOS はネイティブ 219 tests 通過。
+
+**Notes for next session:**
+- **JLL の UUID は名前から決定的** `aa22cf4d-d005-5d21-a85e-c2597cc45fba`。Route A（Yggdrasil→General）
+  へ移行しても UUID/名前は不変なので **Meddly.jl のコードと [deps] は無変更**。移行時の作業は
+  「自前レジストリの libmeddly_c_jll エントリ退役」だけ（同一 UUID が2 repo を指す衝突回避）。
+- シムを直したら新 JLL を切る必要がある: Meddly.jl のタグを上げ、`build/build_tarballs.jl` の
+  Meddly.jl `GitSource` SHA を更新し `--deploy` → レジストリに新版登録。`build/README.md` 参照。
+- **GitHub の `/archive/refs/tags/*.tar.gz` は BinaryBuilder が拒否**（チェックサム非安定）。
+  シムは必ず `GitSource`＋コミット SHA で固定する。
+- クロスコンパイルの罠2つ（レシピに対処済み）: `ac_cv_func_{malloc,realloc}_0_nonnull=yes`、
+  macOS は `BINARYBUILDER_AUTOMATIC_APPLE=true`。
