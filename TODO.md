@@ -102,8 +102,10 @@ t・e をあらかじめ OMEGA_NORMAL(0) 背景（dense）で構築した上で
 - **ミンターム反復 API**: `foreach_minterm(f, e, callback)` — DD を走査して
   各ミンタームをコールバックで返す。現状は traversal API で自前実装が必要
   （README の `collect_minterms` 例を参照）。
-- **JLL アーティファクト**: `libmeddly_c` のビルド済みバイナリを JLL パッケージとして
-  配布することで `Pkg.build` 不要にできる。
+- ~~**JLL アーティファクト**: `libmeddly_c` のビルド済みバイナリを JLL パッケージとして
+  配布することで `Pkg.build` 不要にできる。~~ **解決済み (v0.6.0)**: `libmeddly_c_jll` として
+  配布（`build/build_tarballs.jl`、JuliaReliab レジストリ）。`deps/build.jl` 廃止。
+  今後: Yggdrasil に PR して General 登録（Route A）。
 - ~~**MxD（関係フォレスト）テスト**: `kind = :mxd` は配線済みだが最小限しかテストされていない。~~ **解決済み (v0.4.0)**: `MDDForestBoolMxD`, `mxd_singleton`, `post_image`, `reachable_bfs` を実装・テスト済み。
 - ~~**`var!` 構築の高速化**: 現状は他変数の全組み合わせを反復して単一ミンターム Edge を
   足し合わせるため，変数数・定義域サイズが大きいと遅い。MEDDLY の内部 API で

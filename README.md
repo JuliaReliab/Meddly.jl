@@ -4,21 +4,26 @@ Julia wrapper for the [MEDDLY](https://github.com/asminer/meddly) C++ library
 (Multi-terminal and Edge-valued Decision Diagram LibrarY).
 
 The package communicates with MEDDLY through a thin C ABI shim (`libmeddly_c`)
-so that no C++ symbols cross the Julia boundary.  MEDDLY and the shim are
-built automatically by `Pkg.build`.
+so that no C++ symbols cross the Julia boundary.  MEDDLY and the shim ship
+prebuilt as [`libmeddly_c_jll`](https://github.com/JuliaReliab/libmeddly_c_jll.jl)
+— no source build, autotools, or C++ compiler needed at install time.
 
 ---
 
 ## Installation
 
-Prerequisites: `git`, `autoconf`, `automake`, `glibtool` (macOS) / `libtool`
-(Linux), and a C++ compiler (`clang++` or `g++`).
+`libmeddly_c_jll` is published in the JuliaReliab registry (not General yet).
+Add that registry once, then add Meddly:
 
 ```julia
 using Pkg
-Pkg.develop(path = "/path/to/Meddly.jl")
-Pkg.build("Meddly")          # downloads MEDDLY source and builds everything
+Pkg.Registry.add(RegistrySpec(url = "https://github.com/JuliaReliab/Registry.git"))
+Pkg.add("Meddly")            # or Pkg.develop(path = "/path/to/Meddly.jl")
 ```
+
+To develop against a locally built shim instead of the JLL binary, set the
+`LIBMEDDLY_C_PATH` environment variable to your `libmeddly_c.{so,dylib}` (see
+`build/README.md` for building it).
 
 ---
 
@@ -587,13 +592,11 @@ src/highlevel.jl   ← public API (operators, ifthenelse, @match, session, todot
 src/types.jl       ← mutable structs + GC finalizers
 src/lowlevel.jl    ← ccall wrappers (_ll_* functions)
       │
-      │  dlopen("libmeddly_c")
+      │  dlopen(libmeddly_c_jll.libmeddly_c)
       │
-c/meddly_c.cpp     ← C ABI shim (extern "C"; all C++ exceptions caught)
-      │
-      │  static link
-      │
-deps/usr/lib/libmeddly.a   ← MEDDLY 0.18.x built by Pkg.build
+libmeddly_c_jll    ← prebuilt libmeddly_c (C ABI shim, source in c/meddly_c.cpp)
+      │                with MEDDLY 0.18.x statically linked inside
+      │  (built by build/build_tarballs.jl; see build/README.md)
 ```
 
 **Type hierarchy:**

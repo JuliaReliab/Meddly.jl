@@ -1,2 +1,3 @@
 [deps]
 BinaryBuilder = "12aac903-9f7c-5d81-afc2-d9565ea332ae"
+LocalRegistry = "89398ba2-070a-4b16-a995-9893c55d93cf"

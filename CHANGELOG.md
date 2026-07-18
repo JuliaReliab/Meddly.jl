@@ -5,6 +5,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] — 2026-07-18
+
+### Changed
+
+- **Binary distribution via `libmeddly_c_jll`.** The C ABI shim (with MEDDLY statically linked) now ships prebuilt as a JLL instead of being compiled from source at install time. Installing no longer needs autotools or a C++ compiler; `deps/build.jl` (which cloned and built MEDDLY) is removed. The public API is unchanged.
+  - `libmeddly_c_jll` is added as a dependency; `src/Meddly.jl` and the test suite resolve the library from it. `LIBMEDDLY_C_PATH` still overrides it for development against a locally built shim.
+  - The JLL is built by `build/build_tarballs.jl` (BinaryBuilder) for x86_64/aarch64 Linux and macOS, and published in the JuliaReliab registry.
+
+---
+
 ## [0.5.0] — 2026-07-18
 
 ### Added

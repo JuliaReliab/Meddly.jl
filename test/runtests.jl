@@ -1,13 +1,9 @@
 using Test
 
-# Resolve library path: prefer deps/deps.jl (written by Pkg.build),
-# then LIBMEDDLY_C_PATH env var, then bare name as last resort.
-const _depsjl = joinpath(@__DIR__, "..", "deps", "deps.jl")
-if isfile(_depsjl)
-    include(_depsjl)          # defines: const libmeddly_c_path = "..."
-else
-    const libmeddly_c_path = get(ENV, "LIBMEDDLY_C_PATH", "libmeddly_c")
-end
+# The shim ships prebuilt as libmeddly_c_jll; LIBMEDDLY_C_PATH overrides it for
+# development against a locally built shim.
+import libmeddly_c_jll
+const libmeddly_c_path = get(ENV, "LIBMEDDLY_C_PATH", libmeddly_c_jll.libmeddly_c)
 const _lib_path = libmeddly_c_path
 const _lib_available = let
     try
@@ -20,8 +16,7 @@ const _lib_available = let
 end
 
 if !_lib_available
-    @warn "libmeddly_c not found at '$(_lib_path)'. " *
-          "Run Pkg.build(\"Meddly\") or build c/Makefile, then re-run the tests."
+    @warn "libmeddly_c not found at '$(_lib_path)'."
     @test_skip "libmeddly_c not available"
 else
 

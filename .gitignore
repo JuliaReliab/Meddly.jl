@@ -1,7 +1,5 @@
-deps/usr/
-deps/meddly-src/
-deps/deps.jl
-deps/build.log
+# deps/ now holds only local build scratch (the binary ships via libmeddly_c_jll)
+deps/
 c/*.dylib
 c/*.so
 .DS_Store

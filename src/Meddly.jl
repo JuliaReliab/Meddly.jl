@@ -16,16 +16,11 @@ export @match
 export MDDSession, mdd, defvar!, compile!, var!
 export mxd_singleton, post_image, reachable_bfs
 
-# Load the library path written by deps/build.jl.
-# Falls back to LIBMEDDLY_C_PATH env var (or bare name) when the package
-# has not been built yet — useful during development / CI.
-const _depsjl = joinpath(@__DIR__, "..", "deps", "deps.jl")
-if isfile(_depsjl)
-    include(_depsjl)          # defines: const libmeddly_c_path = "..."
-else
-    const libmeddly_c_path =
-        get(ENV, "LIBMEDDLY_C_PATH", "libmeddly_c")
-end
+# The C ABI shim (with MEDDLY statically linked) is shipped prebuilt as
+# libmeddly_c_jll — no source build needed.  LIBMEDDLY_C_PATH overrides it for
+# development against a locally built shim.
+import libmeddly_c_jll
+const libmeddly_c_path = get(ENV, "LIBMEDDLY_C_PATH", libmeddly_c_jll.libmeddly_c)
 
 include("lowlevel.jl")
 include("types.jl")

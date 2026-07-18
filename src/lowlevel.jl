@@ -1,7 +1,7 @@
 # Low-level ccall bindings to libmeddly_c.
 # libmeddly_c_path is defined in src/Meddly.jl before this file is included:
-#   - from deps/deps.jl (written by deps/build.jl), or
-#   - from LIBMEDDLY_C_PATH env var / bare name as fallback.
+#   - from libmeddly_c_jll (the prebuilt shim), or
+#   - from the LIBMEDDLY_C_PATH env var when developing against a local build.
 
 const libmeddly_c = libmeddly_c_path
 
