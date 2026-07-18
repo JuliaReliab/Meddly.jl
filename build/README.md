@@ -75,27 +75,25 @@ Result here: **219 pass, 0 fail**. (Gotcha: without `--compiled-modules=no`, a
 stale precompile cache can bake an old `libmeddly_c_path` and dlsym then fails on
 `meddly_edge_from_node` etc. — that is a caching artifact, not a binary defect.)
 
-## Step 0 — tag Meddly.jl and fix the shim source hash
+## Step 0 — tag Meddly.jl and pin the shim commit
 
-`build_tarballs.jl` fetches the shim (`c/meddly_c.cpp`) from the Meddly.jl git
-tag matching the recipe `version` (currently `v0.5.0`). So first:
+`build_tarballs.jl` fetches the shim (`c/meddly_c.cpp`) from the Meddly.jl repo
+by **commit SHA** via `GitSource`. (GitHub's `/archive/refs/tags/*.tar.gz` is
+*not* usable — GitHub does not guarantee its checksum is stable, so
+BinaryBuilder rejects `ArchiveSource` on it. `GitSource` pins by commit and
+needs no separate sha256.)
+
+So when cutting a release: tag it, then set the recipe's Meddly.jl `GitSource`
+SHA to that tag's commit.
 
 ```sh
-git tag v0.5.0 && git push origin v0.5.0
+git tag -a v0.5.0 -m "Meddly.jl v0.5.0" && git push origin v0.5.0
+git rev-list -n1 v0.5.0        # → paste into build_tarballs.jl (Meddly.jl GitSource)
 ```
 
-Then get the archive's sha256 and paste it over the zero placeholder in
-`build_tarballs.jl` (the `ArchiveSource` for Meddly.jl):
-
-```sh
-curl -sL https://github.com/JuliaReliab/Meddly.jl/archive/refs/tags/v0.5.0.tar.gz \
-  | shasum -a 256
-```
-
-(If you skip this, the first build run errors and prints the correct hash — you
-can copy it from there.)
-
-MEDDLY is already pinned by commit SHA (`f8a89d0…`), no tag needed.
+For v0.5.0 this is already done: the recipe pins
+`97e143665f94e5ff98146149c5b6c275ccdf0b51`. MEDDLY is likewise pinned by commit
+(`f8a89d0…`). No sha256 to fill in anywhere.
 
 ## Step 1 — build
 

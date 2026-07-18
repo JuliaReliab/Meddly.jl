@@ -23,14 +23,15 @@ version = v"0.5.0"          # follows the Meddly.jl release the shim comes from
 # is the revision the shim is written against.  This also removes the current
 # unpinned-`master` reproducibility risk.
 #
-# The shim itself lives in the Meddly.jl repo under c/.  It is fetched from the
-# git tag that matches `version` — TAG Meddly.jl v0.5.0 first, then fill in the
-# archive's sha256 below (the build errors and prints the real hash if wrong).
+# The shim itself lives in the Meddly.jl repo under c/.  Pin it by commit SHA
+# (the v0.5.0 tag) via GitSource — NOT GitHub's /archive/refs/tags/*.tar.gz,
+# whose checksum GitHub does not guarantee to be stable, so BinaryBuilder rejects
+# it. Bump this SHA when tagging a new Meddly.jl release.
 sources = [
     GitSource("https://github.com/asminer/meddly.git",
               "f8a89d0f83987c88c66ee3a6623e08757debb435"),
-    ArchiveSource("https://github.com/JuliaReliab/Meddly.jl/archive/refs/tags/v0.5.0.tar.gz",
-                  "0000000000000000000000000000000000000000000000000000000000000000"),
+    GitSource("https://github.com/JuliaReliab/Meddly.jl.git",
+              "97e143665f94e5ff98146149c5b6c275ccdf0b51"),   # v0.5.0
 ]
 
 # --- Build script (runs in the BB sandbox, one target at a time) ---------
