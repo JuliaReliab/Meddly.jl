@@ -12,13 +12,14 @@ prebuilt as [`libmeddly_c_jll`](https://github.com/JuliaReliab/libmeddly_c_jll.j
 
 ## Installation
 
-`libmeddly_c_jll` is published in the JuliaReliab registry (not General yet).
-Add that registry once, then add Meddly:
+Meddly and its prebuilt binary dependency `libmeddly_c_jll` are published in the
+JuliaReliab registry (not General yet). Add that registry once, then add Meddly —
+no C++ compiler or source build needed:
 
 ```julia
 using Pkg
 Pkg.Registry.add(RegistrySpec(url = "https://github.com/JuliaReliab/Registry.git"))
-Pkg.add("Meddly")            # or Pkg.develop(path = "/path/to/Meddly.jl")
+Pkg.add("Meddly")
 ```
 
 To develop against a locally built shim instead of the JLL binary, set the
